@@ -1,17 +1,9 @@
 {
   open Lexing
-  (*open Parser*)
+  open Parser
 
   exception Lexing_error of string
 
-  type token = CST of int
-              | IDENT of string
-              | PLUS | MINUS | TIMES | DIV | MOD
-              | LEFTPAR | RIGHTPAR | BEGIN | END | COMMA | SEMICOLON
-              | FUN | ELSE | FALSE | IF | LET | MUT | RETURN | STRUCT | TRUE | WHILE
-              | ASSIGN | OR | AND
-              | EQUAL | GQ | GEQ | LQ | LEQ | NE | EOF
-              | EXCL | QUO
   let table_kw =
   ["fn",FUN;
    "else",ELSE;

@@ -35,7 +35,16 @@ type typ = Tident of ident
            | Tnull
            (* à complet*)
 
-type argument = ident * typ
+type struct_argument = {
+  name : ident;
+  types : typ
+}
+
+type argument = {
+  name : ident;
+  types : typ;
+  mut : bool;
+}
 
 type decl_fun = {
   name : string;
@@ -46,10 +55,10 @@ type decl_fun = {
 
 type decl_struct = {
   name : string;
-  defs : argument list;
+  defs : struct_argument list;
 }
 
-type decl = Decl_fun of  decl_fun
+type decl = Decl_fun of decl_fun
             | Decl_struct of decl_struct
 
-type prog = decl list
+type program = decl list

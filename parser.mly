@@ -37,47 +37,50 @@
 %%
 
 prog:
-  decls = decl*
-  EOF
+  decls = decl* EOF
   { decls }
-
+;
 typ:
   | t = IDENT { Tident(t) }
-
+;
 argument:
-  MUT? name = IDENT COLON typs = typ
-  { name * typs }
+  | MUT name = IDENT COLON typs = typ    { { name = name; types = typs; mut = true} }
+  | name = IDENT COLON typs = typ    { { name = name; types = typs; mut = false} }
 
 struct_argument:
   name = IDENT COLON typs = typ
-  { name * typs }
+  { { name = name;
+      types = typs; } }
 
 decl:
   | STRUCT s = IDENT BEGIN t = separated_list(COMMA,struct_argument) END
-  { { name = s;
-     defs = t; } }
-  | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) RIGHTPAR IMPLY t = typ block
-    { {
+  { let st = { name = s;
+     defs = t; }
+     in Decl_struct(st) }
+  | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) RIGHTPAR IMPLY t = typ bl = block
+    { let fn = {
       name = f;
       defs = para;
       return = t;
-      body = block
-    } }
-  | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) block
-    { {
+      body = bl
+    }
+    in Decl_fun(fn) }
+  | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) RIGHTPAR bl = block
+    { let fn = {
       name = f;
       defs = para;
-      return = TNull;
-      body = block;
-    } }
-
+      return = Tnull;
+      body = bl;
+    }
+    in Decl_fun(fn) }
+;
 block:
-  | BEGIN ins = instruction* expr END {CFullBlock(ins,expr)}
+  | BEGIN ins = instruction* e = expr END {CFullBlock(ins,e)}
   | BEGIN ins = instruction* END {CBlock(ins)}
-
+;
 instruction:
   | e = expr SEMICOLON {IExpr(e)}
   (*à complet*)
-
+;
 expr:
   | PRINT EXCL LEFTPAR s = CHAIN RIGHTPAR {Eprint(s)}
