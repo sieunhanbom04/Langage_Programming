@@ -4,6 +4,9 @@ type ident = string
 type unop =
   | Uneg (* -e *)
   | Unot (* not e *)
+  | Unstar
+  | Unp
+  | Unmutp
 
 type binop =
   | Badd | Bsub | Bmul | Bdiv | Bmod    (* + - * / % *)
@@ -11,29 +14,42 @@ type binop =
   | Band | Bor                          (* && || *)
 
 type instruction =
-  | IExpr of expr
-  | IWhile of expr * block
-  | IReturn of expr
-  | IReturnNull
-  (*à complet*)
+  | Inothing
+  | Iexpr of expr
+  | ImutExAssign of ident * expr
+  | ImutStAssign of ident * ident * ((ident * expr) list )
+  | IexAssign of ident * expr
+  | IstAssign of ident * ident * ((ident * expr) list )
+  | Iwhile of expr * block
+  | Ireturn of expr
+  | IreturnNull
+  | Icond of condition
 and expr =
   | Econst of int
   | Ebool of bool
-  | Evar of string
+  | Evar of ident
   | Ebinop of binop * expr * expr
   | Eunop of unop * expr
   | Estruct of expr * ident
   | Elength of expr
   | Eindex of expr * expr
   | Eprint of string
-  (*à complet*)
+  | Evector of ident * (expr list)
+  | Eblock of block
 and block =
   | CFullBlock of instruction list * expr
   | CBlock of instruction list
+and condition =
+  | Cif of expr * block * block
+  | CnestedIf of expr * block * condition
 
-type typ = Tident of ident
-           | Tnull
-           (* à complet*)
+type typ = Tnull
+          | Tint
+          | Tbool
+          | Tstruct of ident
+          | Tvec of typ
+          | Tref of typ
+          | Tmut of typ
 
 type struct_argument = {
   name : ident;

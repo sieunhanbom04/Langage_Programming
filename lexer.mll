@@ -16,7 +16,8 @@
    "true",TRUE;
    "while",WHILE;
    "print",PRINT;
-   "vec",VEC]
+   "vec",VEC;
+   "len",LEN]
 
    let assoc_variable s = try List.assoc s table_kw with Not_found -> IDENT (s)
 }
@@ -58,7 +59,11 @@ rule token = parse
   | ":" {COLON}
   | '"' (caractere* as t) '"' {CHAIN(t)}
   | "!" {EXCL}
-  | "->" {IMPLY}
+  | "->" {ARROW}
+  | "." {POINT}
+  | "[" {LEFTSQ}
+  | "]" {RIGHTSQ}
+  | "&" {POINTER}
   | eof {EOF}
   | _ as t {raise (Lexing_error (String.make 1 t))}
 
