@@ -5,6 +5,21 @@
                     "bool",Tbool;
                     ]
   let find_type t = try List.assoc t table_type with _ -> Tstruct(t)
+
+  exception Empty_block
+  exception Empty_ins
+  exception Syntax_Error
+
+  let return_type l = let t = List.concat l in
+                      let rev_t = List.rev t in
+                      if (List.length t) = 0 then CBlock([])
+                      else
+                      (let x = List.hd rev_t in
+                        match x with
+                        | Inothing -> CBlock (t)
+                        | Iexpr e ->  CFullBlock(List.rev (List.tl rev_t),e)
+                        | _ -> raise Syntax_Error)
+                        (*| Iexpr e ->  CFullBlock(List.rev (List.tl rev_t),e)*)
 %}
 
 %token <int> CST
@@ -28,7 +43,6 @@
 
 
 /* Les priorités et associativités des tokens */
-%nonassoc dangling
 %right ASSIGN
 %left OR
 %left AND
@@ -94,15 +108,32 @@ decl:
 ;
 
 block:
-  | BEGIN ins = instruction* END {CBlock(ins)}
-  | BEGIN ins = instruction*; e = expr END %prec dangling {CFullBlock(ins,e)}
+  | BEGIN ins = separated_list(SEMICOLON,instruction_in_general) END { return_type ins }
 ;
 
 assign:
   name = IDENT COLON e = expr {(name , e)}
 ;
-
-instruction:
+instruction_without_block:
+  | {Inothing}
+  | e = expr {Iexpr(e)}
+  | LET MUT id = IDENT ASSIGN e = expr {ImutExAssign(id , e)}
+  | LET id = IDENT ASSIGN e = expr {IexAssign(id,e)}
+  | LET MUT id = IDENT ASSIGN idstruct = IDENT BEGIN var = separated_list(COMMA, assign) END
+      {ImutStAssign(id, idstruct, var)}
+  | LET id = IDENT ASSIGN idstruct = IDENT BEGIN var = separated_list(COMMA, assign) END
+      {IstAssign(id, idstruct, var)}
+  | RETURN {IreturnNull}
+  | RETURN e = expr {Ireturn(e)}
+;
+instruction_with_block:
+  | WHILE e = expr bl = block {Iwhile(e,bl)}
+  | i = condition {Icond(i)}
+;
+instruction_in_general:
+  bad_instruction = instruction_with_block* good_instruction = instruction_without_block {bad_instruction @ (good_instruction::[])}
+;
+(*instruction:
   | SEMICOLON {Inothing}
   | e = expr SEMICOLON {Iexpr(e)}
   | LET MUT id = IDENT ASSIGN e = expr SEMICOLON {ImutExAssign(id , e)}
@@ -115,7 +146,7 @@ instruction:
   | RETURN SEMICOLON {IreturnNull}
   | RETURN e = expr SEMICOLON {Ireturn(e)}
   | i = condition {Icond(i)}
-;
+;*)
 
 condition:
   | IF e = expr bl = block {Cif(e, bl, CBlock([]))}
@@ -134,7 +165,8 @@ expr:
   | e1 = expr POINT id = IDENT %prec st { Estruct(e1,id) }
   | e = expr POINT LEN LEFTPAR RIGHTPAR %prec length { Elength(e) }
   | e1 = expr LEFTSQ e2 = expr RIGHTSQ { Eindex(e1,e2) }
-  (* vector *)
+  | VEC EXCL LEFTSQ e = separated_list(COMMA,expr) RIGHTSQ {Evector(e)}
+  | e1 = IDENT LEFTPAR e = separated_list(COMMA,expr) RIGHTPAR {Ecall(e1,e)}
   | LEFTPAR e = expr RIGHTPAR {e}
   | PRINT EXCL LEFTPAR s = CHAIN RIGHTPAR {Eprint(s)}
   (*à complet*)
@@ -154,6 +186,7 @@ expr:
   | GEQ {Bge}
   | AND {Band}
   | OR {Bor}
+  | ASSIGN {Bassign}
 ;
 
 %inline unop:

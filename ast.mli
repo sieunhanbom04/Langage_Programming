@@ -12,6 +12,7 @@ type binop =
   | Badd | Bsub | Bmul | Bdiv | Bmod    (* + - * / % *)
   | Beq | Bneq | Blt | Ble | Bgt | Bge  (* == != < <= > >= *)
   | Band | Bor                          (* && || *)
+  | Bassign
 
 type instruction =
   | Inothing
@@ -34,7 +35,8 @@ and expr =
   | Elength of expr
   | Eindex of expr * expr
   | Eprint of string
-  | Evector of ident * (expr list)
+  | Ecall of ident * expr list
+  | Evector of expr list
   | Eblock of block
 and block =
   | CFullBlock of instruction list * expr

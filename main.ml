@@ -16,11 +16,15 @@ let rec print_expr e =
   | Eunop (e1, e2) -> if e1 = Uneg then (fprintf stdout "-"; print_expr e2)
   | Econst e1 -> (fprintf stdout "%d\n" e1)
   | Evar id -> (fprintf stdout "%s\n" id)
+  | Ebool b -> (fprintf stdout "%s\n" (string_of_bool b))
+  | Ebinop (b,e1,e2) -> print_expr e1; print_expr e2
   | _ -> ()
 
 let print_ins ins =
   let print_output inst =
     match inst with
+    | Inothing -> fprintf stdout "nothing"
+    | Iexpr e -> print_expr e
     | IexAssign (id,e) -> print_expr e
     | Ireturn e1 -> print_expr e1
     | _ -> ()
@@ -29,14 +33,15 @@ let print_ins ins =
 
 let print_block b =
   match b with
-  | CBlock bgod -> print_ins (bgod); (*print_endline ("check_block " ^ (string_of_int (List.length bgod)));*)
-  | _ -> ()
+  | CBlock bgod -> print_ins (bgod); print_endline "check_block"
+  | CFullBlock (bgod,exp) -> print_ins bgod ;print_expr exp; print_endline "check_fullblock"
 
 let rec print_ast p =
-  match p with
-  | [] -> ()
-  | (Decl_fun f)::[] -> let t = f.body in print_block t; (*print_endline "check_ast"*)
-  | (Decl_struct s)::[] -> ()
+  let print_decl t =
+    match t with
+    | Decl_fun f -> let t = f.body in print_block t; (*print_endline "check_ast"*)
+    | Decl_struct s -> ()
+    in List.iter print_decl p
 
 let () =
   let f = open_in filename in

@@ -26,11 +26,12 @@ let chiffre = ['0'-'9']
 let alpha = ['a'-'z' 'A'-'Z']
 let ident = alpha (alpha | chiffre | '_')*
 let entier = chiffre+
-let caractere = [^ '\\' '"'] | "\\" | "\\\"" | "\\n"
+let caractere = [^ '\\' '"'] | "\\\\" | "\\\"" | "\\n"
 let chain = '"' caractere* '"'
 let space = [' ' '\t']
 
 rule token = parse
+  | "/*" { comment lexbuf; token lexbuf }
   | "//" [^ '\n']* '\n'
   | '\n'    { new_line lexbuf; token lexbuf }
   | ident as t { assoc_variable t }
@@ -66,7 +67,11 @@ rule token = parse
   | "&" {POINTER}
   | eof {EOF}
   | _ as t {raise (Lexing_error (String.make 1 t))}
-
+and comment = parse
+  | "*/" {()}
+  | "/*" { comment lexbuf; comment lexbuf }
+  | _ { comment lexbuf }
+  | eof { failwith "wrong comment" }
 (*
 rule token = parse
   | "//" [^ '\n']* '\n'
