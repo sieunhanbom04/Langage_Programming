@@ -15,8 +15,6 @@
    "struct",STRUCT;
    "true",TRUE;
    "while",WHILE;
-   "print",PRINT;
-   "vec",VEC;
    "len",LEN]
 
    let assoc_variable s = try List.assoc s table_kw with Not_found -> IDENT (s)
@@ -26,7 +24,7 @@ let chiffre = ['0'-'9']
 let alpha = ['a'-'z' 'A'-'Z']
 let ident = alpha (alpha | chiffre | '_')*
 let entier = chiffre+
-let caractere = [^ '\\' '"'] | "\\\\" | "\\\"" | "\\n"
+let caractere = [^ '\\' '"'] | "\\\\" | "\\\"" | "\\n" | "\\t"
 let chain = '"' caractere* '"'
 let space = [' ' '\t']
 

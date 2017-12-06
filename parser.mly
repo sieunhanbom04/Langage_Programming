@@ -10,22 +10,28 @@
   exception Empty_ins
   exception Syntax_Error
 
+  let rec remove_null_instruction p =
+    match p with
+    | [] -> []
+    | (Inothing) :: rest -> remove_null_instruction rest
+    | (_ as t):: rest -> t :: (remove_null_instruction rest)
+
   let return_type l = let t = List.concat l in
                       let rev_t = List.rev t in
                       if (List.length t) = 0 then CBlock([])
                       else
                       (let x = List.hd rev_t in
                         match x with
-                        | Inothing -> CBlock (t)
-                        | Iexpr e ->  CFullBlock(List.rev (List.tl rev_t),e)
+                        | Inothing -> CBlock (remove_null_instruction t)
+                        | Iexpr e ->  CFullBlock(remove_null_instruction (List.rev (List.tl rev_t)),e)
                         | _ -> raise Syntax_Error)
-                        (*| Iexpr e ->  CFullBlock(List.rev (List.tl rev_t),e)*)
+
 %}
 
 %token <int> CST
 %token <string> IDENT
 %token LEFTPAR RIGHTPAR BEGIN END COMMA SEMICOLON
-%token FUN ELSE FALSE IF LET MUT RETURN STRUCT TRUE WHILE PRINT VEC
+%token FUN ELSE FALSE IF LET MUT RETURN STRUCT TRUE WHILE
 %token ASSIGN
 %token OR
 %token AND
@@ -69,6 +75,7 @@ prog:
 
 typ:
   | t = IDENT { find_type t }
+  | name = IDENT LQ t = typ GQ { Tstructgeneric(name,t) }
   | POINTER t = typ {Tref(t)}
   | POINTER MUT t = typ {Tmut(t)}
 ;
@@ -165,10 +172,10 @@ expr:
   | e1 = expr POINT id = IDENT %prec st { Estruct(e1,id) }
   | e = expr POINT LEN LEFTPAR RIGHTPAR %prec length { Elength(e) }
   | e1 = expr LEFTSQ e2 = expr RIGHTSQ { Eindex(e1,e2) }
-  | VEC EXCL LEFTSQ e = separated_list(COMMA,expr) RIGHTSQ {Evector(e)}
+  | t = IDENT EXCL LEFTSQ e = separated_list(COMMA,expr) RIGHTSQ { if t = "vec" then Evector(e) else raise Syntax_Error}
   | e1 = IDENT LEFTPAR e = separated_list(COMMA,expr) RIGHTPAR {Ecall(e1,e)}
   | LEFTPAR e = expr RIGHTPAR {e}
-  | PRINT EXCL LEFTPAR s = CHAIN RIGHTPAR {Eprint(s)}
+  | t = IDENT EXCL LEFTPAR s = CHAIN RIGHTPAR { if t = "print" then Eprint(s) else raise Syntax_Error}
   (*à complet*)
 ;
 
@@ -191,6 +198,7 @@ expr:
 
 %inline unop:
   | MINUS {Uneg}
+  | EXCL {Unot}
   | TIMES {Unstar}
   | POINTER {Unp}
   | POINTER MUT {Unmutp}

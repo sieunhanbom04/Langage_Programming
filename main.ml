@@ -4,7 +4,7 @@ open Parser
 open Ast
 open Printf
 
-let filename = "tung.txt"
+let filename = "tests/syntax/good/testfile-empty-1.rs"
 let localisation pos =
   let l = pos.pos_lnum in
   let c = pos.pos_cnum - pos.pos_bol + 1 in

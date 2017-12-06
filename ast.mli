@@ -49,7 +49,7 @@ type typ = Tnull
           | Tint
           | Tbool
           | Tstruct of ident
-          | Tvec of typ
+          | Tstructgeneric of ident * typ
           | Tref of typ
           | Tmut of typ
 
