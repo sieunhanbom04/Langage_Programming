@@ -81,35 +81,35 @@ typ:
 ;
 
 argument:
-  | MUT name = IDENT COLON typs = typ    { { name = name; types = typs; mut = true} }
-  | name = IDENT COLON typs = typ    { { name = name; types = typs; mut = false} }
+  | MUT name = IDENT COLON typs = typ    { { name_arg = name; type_arg = typs; mut_arg = true} }
+  | name = IDENT COLON typs = typ    { { name_arg = name; type_arg = typs; mut_arg = false} }
 ;
 
 struct_argument:
   name = IDENT COLON typs = typ
-  { { name = name;
-      types = typs; } }
+  { { name_struct_arg = name;
+      type_struct_arg = typs; } }
 ;
 
 decl:
   | STRUCT s = IDENT BEGIN t = separated_list(COMMA,struct_argument) END
-  { let st = { name = s;
-     defs = t; }
+  { let st = { name_struct = s;
+     def_struct = t; }
      in Decl_struct(st) }
   | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) RIGHTPAR ARROW t = typ bl = block
     { let fn = {
-      name = f;
-      defs = para;
-      return = t;
-      body = bl
+      name_func = f;
+      def_func = para;
+      return_func = t;
+      body_func = bl
     }
     in Decl_fun(fn) }
   | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) RIGHTPAR bl = block
     { let fn = {
-      name = f;
-      defs = para;
-      return = Tnull;
-      body = bl;
+      name_func = f;
+      def_func = para;
+      return_func = Tnull;
+      body_func = bl;
     }
     in Decl_fun(fn) }
 ;

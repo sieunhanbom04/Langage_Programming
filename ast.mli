@@ -54,26 +54,26 @@ type typ = Tnull
           | Tmut of typ
 
 type struct_argument = {
-  name : ident;
-  types : typ
+  name_struct_arg : ident;
+  type_struct_arg : typ
 }
 
 type argument = {
-  name : ident;
-  types : typ;
-  mut : bool;
+  name_arg : ident;
+  type_arg : typ;
+  mut_arg : bool;
 }
 
 type decl_fun = {
-  name : string;
-  defs : argument list;
-  return : typ;
-  body : block;
+  name_func : string;
+  def_func : argument list;
+  return_func : typ;
+  body_func : block;
 }
 
 type decl_struct = {
-  name : string;
-  defs : struct_argument list;
+  name_struct : string;
+  def_struct : struct_argument list;
 }
 
 type decl = Decl_fun of decl_fun
