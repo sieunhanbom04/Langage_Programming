@@ -1,6 +1,9 @@
 
+/* Analyseur syntaxique pour mini-Turtle */
+
 %{
   open Ast
+
   let table_type = ["i32",Tint;
                     "bool",Tbool;
                     ]
@@ -16,15 +19,47 @@
     | (Inothing) :: rest -> remove_null_instruction rest
     | (_ as t):: rest -> t :: (remove_null_instruction rest)
 
-  let return_type l = let t = List.concat l in
+  let remove_option l =
+    match l with
+    | None -> []
+    | Some t -> t
+
+  let check_valid_block l =
+   let t = List.map remove_null_instruction l in
+   let check_small_block sb =
+    match sb with
+    | [] -> ()
+    | r -> let d = List.hd (List.rev r) in
+      (match d with
+      | Iwhile _ | Icond _ -> raise Syntax_Error
+      | _ -> ()
+      )
+   in
+   List.iter check_small_block t
+
+  let return_type l = let t = remove_null_instruction (List.concat l) in
+                      let rev_t = List.rev t in
+                      if (List.length t) = 0 then CBlock([])
+                      else (check_valid_block (List.rev (List.tl (List.rev l)));
+                      let x = List.hd rev_t in
+                        match x with
+                        | Iexpr e ->  CFullBlock((List.rev (List.tl rev_t)),e)
+                        | _ -> CBlock (t))
+
+
+  (*let remove_option l =
+    match l with
+    | None -> []
+    | Some t -> t
+    let return_type l =
+                      let t = remove_null_instruction (List.concat  l) in
                       let rev_t = List.rev t in
                       if (List.length t) = 0 then CBlock([])
                       else
                       (let x = List.hd rev_t in
                         match x with
-                        | Inothing -> CBlock (remove_null_instruction t)
-                        | Iexpr e ->  CFullBlock(remove_null_instruction (List.rev (List.tl rev_t)),e)
-                        | _ -> raise Syntax_Error)
+                        | Iexpr e ->  CFullBlock((List.rev (List.tl rev_t)),e)
+                        | _ -> CBlock (t))*)
 
 %}
 
@@ -201,4 +236,4 @@ expr:
   | EXCL {Unot}
   | TIMES {Unstar}
   | POINTER {Unp}
-  | POINTER MUT {Unmutp}
+| POINTER MUT {Unmutp}

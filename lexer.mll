@@ -18,6 +18,17 @@
    "len",LEN]
 
    let assoc_variable s = try List.assoc s table_kw with Not_found -> IDENT (s)
+
+   let rec fix_string s i = if (i + 1) >= (String.length s) then s
+                            else if (s.[i] = '\\' && s.[i+1] = 'n') then
+                            (fix_string ((String.sub s 0 i) ^ (String.make 1 '\n') ^ (String.sub s (i+2) ((String.length s)-i-2))) (i+1))
+                            else if (s.[i] = '\\' && s.[i+1] = 't') then
+                            (fix_string ((String.sub s 0 i) ^ (String.make 1 '\t') ^ (String.sub s (i+2) ((String.length s)-i-2))) (i+1))
+                            else if (s.[i] = '\\' && s.[i+1] = '\\') then
+                            (fix_string ((String.sub s 0 i) ^ (String.make 1 '\\') ^ (String.sub s (i+2) ((String.length s)-i-2))) (i+1))
+                            else if (s.[i] = '\\' && s.[i+1] = '\"') then
+                            (fix_string ((String.sub s 0 i) ^ (String.make 1 '\"') ^ (String.sub s (i+2) ((String.length s)-i-2))) (i+1))
+                            else fix_string s (i+1)
 }
 
 let chiffre = ['0'-'9']
@@ -56,7 +67,7 @@ rule token = parse
   | "||" {OR}
   | "&&" {AND}
   | ":" {COLON}
-  | '"' (caractere* as t) '"' {CHAIN(t)}
+  | '"' (caractere* as t) '"' {CHAIN(fix_string t 0)}
   | "!" {EXCL}
   | "->" {ARROW}
   | "." {POINT}
