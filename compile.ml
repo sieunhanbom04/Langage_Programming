@@ -50,6 +50,13 @@ let rec calculate_size typ =
   | Tmut t -> calculate_size t
 
 (*Convert from type struct into name of struct*)
+(*TODO:: added a boolean to know dereference*)
+let rec auto_dereference t =
+  match t with
+  | Tref (Tmut i) -> i (*true*)
+  | Tstruct _ | Tstructgeneric _ -> t (*false*)
+  | Tref i -> i (*true*)
+
 
 let convert_into_struct_name ty =
   match ty with
@@ -110,7 +117,7 @@ let rec alloc_expr env_alloc env_typ next e =
     let exp,fpmax = alloc_expr env_alloc env_typ next e in
     PEunop (o, exp), fpmax
 
-  | Estruct (e,id) -> let ty = type_check_expr env_typ e in
+  | Estruct (e,id) -> let ty = auto_dereference (type_check_expr env_typ e) in
                       let loc,size2 =
                       (try
                         let t = convert_into_struct_name ty in
@@ -156,21 +163,36 @@ and alloc_instruction env_alloc env_type next ins =
                             let size = calculate_size te in
                             PIexAssign (- next - size, t), (max (next + size) fpmax), Vmap.add id (- next - size) env_alloc
 
-  (*| ImutStAssign of id1 * id2 * ((ident * expr) list ) -> PImutStAssign of int * ident * ((ident * pexpr) list ) * int
-  | IexAssign id * e -> let t, fpmax = (alloc_expr env next e) in
-                                    PImutExAssign (- next - 8, t), (max (next + 8), fpmax), Vmap.add id (- next - 8) env
-  | IstAssign of ident * ident * ((ident * expr) list ) -> PIstAssign of int * ident * ((ident * pexpr) list ) * int
-  | Iwhile of e * b -> let e1, fpmax1 = (alloc_expr env next e) in
-                       let b1, fpmax2 = (alloc_block env next b) in
-                       PIwhile (e1,b1), (max fpmax1 fpmax2), env
-  | Ireturn of expr -> let e1, fpmax = (alloc_expr env next e) in
-                        PIreturn (e1), fpmax, env
-  | IreturnNull -> PIreturnNull , next, env*)
+  | ImutStAssign (id1, id2, e1) -> let st = Hashtbl.find representation_env id2 in
+                                   Hashtbl.add env_type.evar id1 (Tstruct (id2), true, Plein);
+                                   let l_exp, fpmax = List.fold_right (fun (x,y) (e,fp) ->
+                                              let t1,fp1 = alloc_expr env_alloc env_type next y in
+                                              let loc = List.assoc x st.fields in
+                                              (loc,t1)::e, max fp fp1) e1 ([],next)
+                                  in PImutStAssign ( - next - st.total, (max fpmax (next + st.total)),l_exp), (max fpmax (next + st.total)), Vmap.add id1 ( - next - st.total) env_alloc
+
+  | IstAssign (id1, id2, e1) -> let st = Hashtbl.find representation_env id2 in
+                                   Hashtbl.add env_type.evar id1 (Tstruct (id2), false, Plein);
+                                   let l_exp, fpmax = List.fold_right (fun (x,y) (e,fp) ->
+                                              let t1,fp1 = alloc_expr env_alloc env_type next y in
+                                              let loc = List.assoc x st.fields in
+                                              (loc,t1)::e, max fp fp1) e1 ([],next)
+                                  in PImutStAssign ( - next - st.total, (max fpmax (next + st.total)),l_exp), (max fpmax (next + st.total)), Vmap.add id1 ( - next - st.total) env_alloc
+
+  | Iwhile (e, b) -> let e1, fpmax1 = (alloc_expr env_alloc env_type next e) in
+                       let b1, fpmax2 = (alloc_block env_alloc env_type next b) in
+                       PIwhile (e1,b1), (max fpmax1 fpmax2), env_alloc
+
+  | Ireturn e -> let e1, fpmax = (alloc_expr env_alloc env_type next e) in
+                        PIreturn (e1), fpmax, env_alloc
+
+  | IreturnNull -> PIreturnNull , next, env_alloc
+
   | Icond c -> let c1, fpmax1 = alloc_condition env_alloc env_type next c in
                 PIcond(c1), fpmax1, env_alloc
+
   (*| ISreturn c -> let c1, fpmax1 = alloc_condition env_alloc env_type next c in
                 PISreturn(c1), fpmax1, env_alloc*)
-  | _ -> raise (VarUndef("vvvv"))
 
 and alloc_block env_alloc env_type next e =
   match e with
