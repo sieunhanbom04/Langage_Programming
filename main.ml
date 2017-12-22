@@ -6,6 +6,7 @@ open Printf
 open Compile
 
 let filename = "tung.txt"
+let filename = "tests/syntax/bad/testfile-while-1.rs"
 
 let localisation pos =
   let l = pos.pos_lnum in
@@ -35,7 +36,8 @@ let print_ins ins =
     | Inothing -> fprintf stdout "nothing"
     | Iexpr e -> print_expr e
     | IexAssign (id,e) -> print_expr e
-    | Ireturn e1 -> print_expr e1
+    | ICreturn (f,e1) -> fprintf stdout "%s\n" f; print_expr e1
+    | ICreturnNull f -> fprintf stdout "%s\n" f
     | IstAssign (id1, id2, t) -> (fprintf stdout "%s\n" id1); (fprintf stdout "%s\n" id2);
     | _ -> ()
   in
@@ -61,7 +63,7 @@ let () =
     let p = Parser.prog Lexer.token buf in
     close_in f;
     print_ast p;
-    compile_program p (Filename.chop_suffix filename ".txt" ^ ".s");
+    (*compile_program p (Filename.chop_suffix filename ".txt" ^ ".s");*)
   with
     | Lexer.Lexing_error c -> localisation (Lexing.lexeme_start_p buf);
 	                             eprintf "Erreur lexicale: %s@.\n" c;
@@ -69,6 +71,6 @@ let () =
     | Parser.Error -> localisation (Lexing.lexeme_start_p buf);
 	                       eprintf "Erreur syntaxique@.\n";
 	                       exit 1
-    | _ -> localisation_modify (Lexing.lexeme_start_p buf);
-	                       eprintf "Erreur syntaxique@.\n";
-	                       exit 1
+    (*| _ -> localisation_modify (Lexing.lexeme_start_p buf);
+	                       eprintf "Erreur syntaxique 1@.\n";
+	                       exit 1*)

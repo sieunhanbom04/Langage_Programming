@@ -3,6 +3,7 @@
 
 %{
   open Ast
+  open Printf
 
   let table_type = ["i32",Tint;
                     "bool",Tbool;
@@ -24,6 +25,16 @@
     | None -> []
     | Some t -> t
 
+  let check_last_ins l = fprintf stdout "%d tung\n" (List.length l);
+    if ((List.length l) = 1) then (match l with
+    | (Iexpr e)::[] -> ()
+    | Inothing::[] -> ()
+    | _ -> raise Syntax_Error)
+    else (match List.hd (List.rev (remove_null_instruction l)) with
+    | Iexpr e -> ()
+    | Icond c -> ()
+    | _ -> raise Syntax_Error)
+
   let check_valid_block l =
    let t = List.map remove_null_instruction l in
    let check_small_block sb =
@@ -41,12 +52,52 @@
                       let rev_t = List.rev t in
                       if (List.length t) = 0 then CBlock([])
                       else (check_valid_block (List.rev (List.tl (List.rev l)));
+                      check_last_ins (List.hd (List.rev l));
                       let x = List.hd rev_t in
                         match x with
                         | Iexpr e ->  CFullBlock((List.rev (List.tl rev_t)),e)
                         | _ -> CBlock (t))
 
+  let rec fix_return_block b name =
+    match b with
+    | CFullBlock (bl,e) -> CFullBlock(List.map (fun ins -> fix_return_ins ins name) bl, fix_return_expr e name)
+    | CBlock bl -> CBlock(List.map (fun ins -> fix_return_ins ins name) bl)
 
+  and fix_return_ins ins name =
+    match ins with
+    | Inothing -> Inothing
+    | Iexpr e -> Iexpr (fix_return_expr e name)
+    | ImutExAssign (id, e) -> ImutExAssign (id, fix_return_expr e name)
+    | ImutStAssign (id1, id2, e) -> ImutStAssign (id1, id2, List.map (fun (id,e1) -> id, fix_return_expr e1 name) e)
+    | IexAssign (id, e) -> IexAssign (id, fix_return_expr e name)
+    | IstAssign (id1, id2, e) -> IstAssign (id1, id2, List.map (fun (id,e1) -> id, fix_return_expr e1 name) e)
+    | Iwhile (e, bl) -> Iwhile(fix_return_expr e name,fix_return_block bl name)
+    | Ireturn e -> ICreturn (name, fix_return_expr e name)
+    | IreturnNull -> ICreturnNull name
+    | Icond c -> Icond (fix_return_condition c name)
+
+  and fix_return_expr ex name =
+    match ex with
+    | Ebinop (bnop, e1, e2) -> Ebinop(bnop, fix_return_expr e1 name, fix_return_expr e2 name)
+    | Eunop (u,e) -> Eunop (u,fix_return_expr e name)
+    | Estruct (e,id) -> Estruct (fix_return_expr e name,id)
+    | Elength e -> Elength (fix_return_expr e name)
+    | Eindex (e1,e2) -> Eindex (fix_return_expr e1 name, fix_return_expr e2 name)
+    | Ecall (id, e) -> Ecall(id, List.map (fun e1 -> fix_return_expr e1 name) e)
+    | Evector e -> Evector (List.map (fun e1 -> fix_return_expr e1 name) e)
+    | Eblock bl -> Eblock (fix_return_block bl name)
+    | _ -> ex
+
+  and fix_return_condition c name =
+    match c with
+    | Cif (e,b1,b2) -> Cif(fix_return_expr e name, fix_return_block b1 name, fix_return_block b2 name)
+    | CnestedIf (e,b,c1) -> CnestedIf (fix_return_expr e name, fix_return_block b name, fix_return_condition c1 name)
+
+  let fix_return df = let bl = fix_return_block df.body_func df.name_func in
+                      {name_func = df.name_func;
+                      def_func = df.def_func;
+                      return_func = df.return_func;
+                      body_func = bl}
   (*let remove_option l =
     match l with
     | None -> []
@@ -138,7 +189,7 @@ decl:
       return_func = t;
       body_func = bl
     }
-    in Decl_fun(fn) }
+    in Decl_fun(fix_return fn) }
   | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) RIGHTPAR bl = block
     { let fn = {
       name_func = f;
@@ -146,7 +197,7 @@ decl:
       return_func = Tnull;
       body_func = bl;
     }
-    in Decl_fun(fn) }
+    in Decl_fun(fix_return fn) }
 ;
 
 block:

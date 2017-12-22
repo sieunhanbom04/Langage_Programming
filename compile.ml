@@ -71,7 +71,6 @@ let rec calculate_relative_position l next =
   | (x, y) :: rest -> ( x, next) :: (calculate_relative_position l (next + y))
 
 (*This function is used to calculate the size of complicated struct data
-
 and update the name and value to the hash table representation_env *)
 
 let calculate_rep p =
@@ -185,13 +184,14 @@ and alloc_instruction env_alloc env_type next ins =
 
   | Ireturn e -> let e1, fpmax = (alloc_expr env_alloc env_type next e) in
                         PIreturn (e1), fpmax, env_alloc
+  | _ -> raise (VarUndef("successful"))
 
-  | IreturnNull -> PIreturnNull , next, env_alloc
+  (*| IreturnNull -> PIreturnNull , next, env_alloc
 
   | Icond c -> let c1, fpmax1 = alloc_condition env_alloc env_type next c in
                 PIcond(c1), fpmax1, env_alloc
 
-  (*| ISreturn c -> let c1, fpmax1 = alloc_condition env_alloc env_type next c in
+  | ISreturn c -> let c1, fpmax1 = alloc_condition env_alloc env_type next c in
                 PISreturn(c1), fpmax1, env_alloc*)
 
 and alloc_block env_alloc env_type next e =
@@ -223,7 +223,6 @@ and alloc_condition env_alloc env_type next c =
                           PCnestedIf (e1,b1,i1), max (max fpmax1 fpmax2) fpmax3
 
 (*This function used to compile the general declaration
-
 let empty_env = { evar = Hashtbl.create 17, level = 1 }*)
 
 let alloc_decl d =
@@ -256,7 +255,7 @@ let rec compile_expr e =
   match e with
   | PEconst i -> movq (imm i) (reg rax) ++ pushq (reg rax)
   | PEbool b -> pushq (imm b)
-  | PEvar (v,size) -> (*fprintf stdout "%d\n" v;*)pushn size ++ leaq (ind ~ofs:0 rsp) (rbx) ++ leaq (ind ~ofs:v rbp) (rcx) ++ memmove size
+  | PEvar (v,size) -> pushn size ++ leaq (ind ~ofs:0 rsp) (rbx) ++ leaq (ind ~ofs:v rbp) (rcx) ++ memmove size
   | PEprint (s) ->  movq (ilab s) (reg rdi) ++ pushq (reg rax)
                   ++ movq (imm 0) (reg rax) ++ call "printf" ++ popq rax
   | PEbinop (o,exp1,exp2) -> compile_binop_expr o exp1 exp2

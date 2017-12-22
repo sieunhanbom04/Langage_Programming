@@ -23,7 +23,9 @@ type instruction =
   | IstAssign of ident * ident * ((ident * expr) list )
   | Iwhile of expr * block
   | Ireturn of expr
+  | ICreturn of ident * expr
   | IreturnNull
+  | ICreturnNull of ident
   | Icond of condition
 and expr =
   | Econst of int

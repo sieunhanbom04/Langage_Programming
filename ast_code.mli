@@ -3,9 +3,9 @@ open Ast
 type pinstruction =
   | PIexpr of pexpr
   | PImutExAssign of int * pexpr
-  | PImutStAssign of int * ident * ((ident * pexpr) list )
+  | PImutStAssign of int * int * ((int * pexpr) list )
   | PIexAssign of int * pexpr
-  | PIstAssign of int * ident * ((ident * pexpr) list )
+  | PIstAssign of int * int * ((int * pexpr) list )
   | PIwhile of pexpr * pblock
   | PIreturn of pexpr
   | PIreturnNull
