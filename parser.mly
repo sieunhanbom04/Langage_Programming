@@ -4,6 +4,7 @@
 %{
   open Ast
   open Printf
+  open Parsing
 
   let table_type = ["i32",Tint;
                     "bool",Tbool;
@@ -12,105 +13,93 @@
 
   exception Empty_block
   exception Empty_ins
-  exception Syntax_Error
+  exception Syntax_Error of int
 
   let rec remove_null_instruction p =
     match p with
     | [] -> []
-    | (Inothing) :: rest -> remove_null_instruction rest
+    | (Inothing _) :: rest -> remove_null_instruction rest
     | (_ as t):: rest -> t :: (remove_null_instruction rest)
 
-  let remove_option l =
-    match l with
-    | None -> []
-    | Some t -> t
-
-  let check_last_ins l = fprintf stdout "%d tung\n" (List.length l);
+  let check_last_ins l =
     if ((List.length l) = 1) then (match l with
-    | (Iexpr e)::[] -> ()
-    | Inothing::[] -> ()
-    | _ -> raise Syntax_Error)
+    | (Iexpr (e,l))::[] -> ()
+    | (Inothing l)::[] -> ()
+    | _ -> raise Parsing.Parse_error)
     else (match List.hd (List.rev (remove_null_instruction l)) with
-    | Iexpr e -> ()
-    | Icond c -> ()
-    | _ -> raise Syntax_Error)
+    | Iexpr (e,l) -> ()
+    | Icond (c,l) -> ()
+    | Iwhile (e,b,l) -> ()
+    | _ -> raise Parsing.Parse_error)
 
-  let check_valid_block l =
+  (*let check_valid_block l =
    let t = List.map remove_null_instruction l in
    let check_small_block sb =
     match sb with
     | [] -> ()
     | r -> let d = List.hd (List.rev r) in
       (match d with
-      | Iwhile _ | Icond _ -> raise Syntax_Error
+      | Iwhile _ | Icond _ -> raise (Syntax_Error 3)
       | _ -> ()
       )
    in
-   List.iter check_small_block t
+   List.iter check_small_block t*)
 
-  let return_type l = let t = remove_null_instruction (List.concat l) in
+  let return_type l loc = let t = remove_null_instruction (List.concat l) in
                       let rev_t = List.rev t in
-                      if (List.length t) = 0 then CBlock([])
-                      else (check_valid_block (List.rev (List.tl (List.rev l)));
-                      check_last_ins (List.hd (List.rev l));
+                      if (List.length t) = 0 then CBlock([],loc)
+                      else (*(check_valid_block (List.rev (List.tl (List.rev l)));*)
+                      (check_last_ins (List.hd (List.rev l));
                       let x = List.hd rev_t in
                         match x with
-                        | Iexpr e ->  CFullBlock((List.rev (List.tl rev_t)),e)
-                        | _ -> CBlock (t))
+                        | Iexpr (e,l) ->  CFullBlock((List.rev (List.tl rev_t)),e,loc)
+                        | _ -> CBlock (t,loc))
+
 
   let rec fix_return_block b name =
     match b with
-    | CFullBlock (bl,e) -> CFullBlock(List.map (fun ins -> fix_return_ins ins name) bl, fix_return_expr e name)
-    | CBlock bl -> CBlock(List.map (fun ins -> fix_return_ins ins name) bl)
+    | CFullBlock (bl,e,l) -> CFullBlock(List.map (fun ins -> fix_return_ins ins name) bl, fix_return_expr e name,l)
+    | CBlock (bl,l) -> CBlock(List.map (fun ins -> fix_return_ins ins name) bl,l)
 
   and fix_return_ins ins name =
     match ins with
-    | Inothing -> Inothing
-    | Iexpr e -> Iexpr (fix_return_expr e name)
-    | ImutExAssign (id, e) -> ImutExAssign (id, fix_return_expr e name)
-    | ImutStAssign (id1, id2, e) -> ImutStAssign (id1, id2, List.map (fun (id,e1) -> id, fix_return_expr e1 name) e)
-    | IexAssign (id, e) -> IexAssign (id, fix_return_expr e name)
-    | IstAssign (id1, id2, e) -> IstAssign (id1, id2, List.map (fun (id,e1) -> id, fix_return_expr e1 name) e)
-    | Iwhile (e, bl) -> Iwhile(fix_return_expr e name,fix_return_block bl name)
-    | Ireturn e -> ICreturn (name, fix_return_expr e name)
-    | IreturnNull -> ICreturnNull name
-    | Icond c -> Icond (fix_return_condition c name)
+    | Inothing l -> Inothing l
+    | Iexpr (e,l) -> Iexpr (fix_return_expr e name,l)
+    | IexAssign (id, e, bo, l) -> IexAssign (id, fix_return_expr e name, bo, l)
+    | IstAssign (id1, id2, e, bo, l) -> IstAssign (id1, id2, List.map (fun (id,e1) -> id, fix_return_expr e1 name) e, bo, l)
+    | Iwhile (e, bl, l) -> Iwhile(fix_return_expr e name,fix_return_block bl name, l)
+    | Ireturn (e, l) -> ICreturn (name, fix_return_expr e name, l)
+    | IreturnNull l -> ICreturnNull (name, l)
+    | Icond (c, l) -> Icond (fix_return_condition c name, l)
 
   and fix_return_expr ex name =
     match ex with
-    | Ebinop (bnop, e1, e2) -> Ebinop(bnop, fix_return_expr e1 name, fix_return_expr e2 name)
-    | Eunop (u,e) -> Eunop (u,fix_return_expr e name)
-    | Estruct (e,id) -> Estruct (fix_return_expr e name,id)
-    | Elength e -> Elength (fix_return_expr e name)
-    | Eindex (e1,e2) -> Eindex (fix_return_expr e1 name, fix_return_expr e2 name)
-    | Ecall (id, e) -> Ecall(id, List.map (fun e1 -> fix_return_expr e1 name) e)
-    | Evector e -> Evector (List.map (fun e1 -> fix_return_expr e1 name) e)
-    | Eblock bl -> Eblock (fix_return_block bl name)
+    | Ebinop (bnop, e1, e2, l) -> Ebinop(bnop, fix_return_expr e1 name, fix_return_expr e2 name, l)
+    | Eunop (u,e, l) -> Eunop (u,fix_return_expr e name, l)
+    | Estruct (e, id, l) -> Estruct (fix_return_expr e name,id, l)
+    | Elength (e,l) -> Elength (fix_return_expr e name, l)
+    | Eindex (e1, e2, l) -> Eindex (fix_return_expr e1 name, fix_return_expr e2 name, l)
+    | Ecall (id, e, l) -> Ecall(id, List.map (fun e1 -> fix_return_expr e1 name) e, l)
+    | Evector (e, l) -> Evector (List.map (fun e1 -> fix_return_expr e1 name) e, l)
+    | Eblock (bl, l) -> Eblock (fix_return_block bl name, l)
     | _ -> ex
 
   and fix_return_condition c name =
     match c with
-    | Cif (e,b1,b2) -> Cif(fix_return_expr e name, fix_return_block b1 name, fix_return_block b2 name)
-    | CnestedIf (e,b,c1) -> CnestedIf (fix_return_expr e name, fix_return_block b name, fix_return_condition c1 name)
+    | Cif (e,b1,b2, l) -> Cif(fix_return_expr e name, fix_return_block b1 name, remove_option b2 name, l)
+    | CnestedIf (e,b,c1,l) -> CnestedIf (fix_return_expr e name, fix_return_block b name, fix_return_condition c1 name,l)
+
+  and remove_option bl name =
+    match bl with
+    | None -> bl
+    | Some s -> Some (fix_return_block s name)
 
   let fix_return df = let bl = fix_return_block df.body_func df.name_func in
                       {name_func = df.name_func;
                       def_func = df.def_func;
                       return_func = df.return_func;
-                      body_func = bl}
-  (*let remove_option l =
-    match l with
-    | None -> []
-    | Some t -> t
-    let return_type l =
-                      let t = remove_null_instruction (List.concat  l) in
-                      let rev_t = List.rev t in
-                      if (List.length t) = 0 then CBlock([])
-                      else
-                      (let x = List.hd rev_t in
-                        match x with
-                        | Iexpr e ->  CFullBlock((List.rev (List.tl rev_t)),e)
-                        | _ -> CBlock (t))*)
+                      body_func = bl;
+                      loc_func = df.loc_func}
 
 %}
 
@@ -167,27 +156,36 @@ typ:
 ;
 
 argument:
-  | MUT name = IDENT COLON typs = typ    { { name_arg = name; type_arg = typs; mut_arg = true} }
-  | name = IDENT COLON typs = typ    { { name_arg = name; type_arg = typs; mut_arg = false} }
+  | MUT name = IDENT COLON typs = typ    { { name_arg = name;
+                                             type_arg = typs;
+                                             mut_arg = true;
+                                             loc_arg = Lct($startpos,$endpos)} }
+  | name = IDENT COLON typs = typ    { { name_arg = name;
+                                         type_arg = typs;
+                                         mut_arg = false;
+                                         loc_arg = Lct($startpos,$endpos)} }
 ;
 
 struct_argument:
   name = IDENT COLON typs = typ
   { { name_struct_arg = name;
-      type_struct_arg = typs; } }
+      type_struct_arg = typs;
+      loc_struct_arg = Lct($startpos,$endpos) } }
 ;
 
 decl:
   | STRUCT s = IDENT BEGIN t = separated_list(COMMA,struct_argument) END
   { let st = { name_struct = s;
-     def_struct = t; }
+     def_struct = t;
+     loc_struct = Lct($startpos,$endpos); }
      in Decl_struct(st) }
   | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) RIGHTPAR ARROW t = typ bl = block
     { let fn = {
       name_func = f;
       def_func = para;
       return_func = t;
-      body_func = bl
+      body_func = bl;
+      loc_func = Lct($startpos,$endpos);
     }
     in Decl_fun(fix_return fn) }
   | FUN f = IDENT LEFTPAR  para = separated_list(COMMA, argument) RIGHTPAR bl = block
@@ -196,73 +194,81 @@ decl:
       def_func = para;
       return_func = Tnull;
       body_func = bl;
+      loc_func = Lct($startpos,$endpos);
     }
     in Decl_fun(fix_return fn) }
 ;
 
 block:
-  | BEGIN ins = separated_list(SEMICOLON,instruction_in_general) END { return_type ins }
+  | BEGIN ins = separated_list(SEMICOLON,instruction_in_general) END { return_type ins (Lct($startpos,$endpos))} (*TODO*)
 ;
 
 assign:
   name = IDENT COLON e = expr {(name , e)}
 ;
 instruction_without_block:
-  | {Inothing}
-  | e = expr {Iexpr(e)}
-  | LET MUT id = IDENT ASSIGN e = expr {ImutExAssign(id , e)}
-  | LET id = IDENT ASSIGN e = expr {IexAssign(id,e)}
+  | {Inothing (Lct($startpos,$endpos))}
+
+  | e = expr {Iexpr(e, Lct($startpos,$endpos))}
+
+  | LET MUT id = IDENT ASSIGN e = expr {IexAssign(id , e, true, Lct($startpos,$endpos))}
+
+  | LET id = IDENT ASSIGN e = expr {IexAssign(id, e, false, Lct($startpos,$endpos))}
+
   | LET MUT id = IDENT ASSIGN idstruct = IDENT BEGIN var = separated_list(COMMA, assign) END
-      {ImutStAssign(id, idstruct, var)}
+      {IstAssign(id, idstruct, var, false, Lct($startpos,$endpos))}
+
   | LET id = IDENT ASSIGN idstruct = IDENT BEGIN var = separated_list(COMMA, assign) END
-      {IstAssign(id, idstruct, var)}
-  | RETURN {IreturnNull}
-  | RETURN e = expr {Ireturn(e)}
+      {IstAssign(id, idstruct, var, true, Lct($startpos,$endpos))}
+
+  | RETURN { IreturnNull (Lct ($startpos,$endpos)) }
+
+  | RETURN e = expr {Ireturn(e, Lct($startpos,$endpos))}
 ;
 instruction_with_block:
-  | WHILE e = expr bl = block {Iwhile(e,bl)}
-  | i = condition {Icond(i)}
+  | WHILE e = expr bl = block {Iwhile(e,bl, Lct($startpos,$endpos))}
+  | i = condition {Icond(i, Lct($startpos,$endpos))}
 ;
 instruction_in_general:
   bad_instruction = instruction_with_block* good_instruction = instruction_without_block {bad_instruction @ (good_instruction::[])}
 ;
-(*instruction:
-  | SEMICOLON {Inothing}
-  | e = expr SEMICOLON {Iexpr(e)}
-  | LET MUT id = IDENT ASSIGN e = expr SEMICOLON {ImutExAssign(id , e)}
-  | LET id = IDENT ASSIGN e = expr SEMICOLON {IexAssign(id,e)}
-  | LET MUT id = IDENT ASSIGN idstruct = IDENT BEGIN var = separated_list(COMMA, assign) END SEMICOLON
-      {ImutStAssign(id, idstruct, var)}
-  | LET id = IDENT ASSIGN idstruct = IDENT BEGIN var = separated_list(COMMA, assign) END SEMICOLON
-      {IstAssign(id, idstruct, var)}
-  | WHILE e = expr bl = block {Iwhile(e,bl)}
-  | RETURN SEMICOLON {IreturnNull}
-  | RETURN e = expr SEMICOLON {Ireturn(e)}
-  | i = condition {Icond(i)}
-;*)
 
 condition:
-  | IF e = expr bl = block {Cif(e, bl, CBlock([]))}
-  | IF e = expr bl1 = block ELSE bl2 = block { Cif(e, bl1, bl2) }
-  | IF e = expr bl = block ELSE i = condition { CnestedIf(e, bl, i) }
+  | IF e = expr bl = block {Cif(e, bl, None, Lct($startpos,$endpos))}
+
+  | IF e = expr bl1 = block ELSE bl2 = block { Cif(e, bl1, Some (bl2), Lct($startpos,$endpos)) }
+
+  | IF e = expr bl = block ELSE i = condition { CnestedIf(e, bl, i, Lct($startpos,$endpos)) }
 ;
 
 expr:
-  | i = CST { Econst(i) }
-  | TRUE { Ebool(true) }
-  | FALSE { Ebool(false) }
-  | id = IDENT { Evar(id) }
-  | bl = block {Eblock(bl)}
-  | e1 = expr op = bop e2 = expr { Ebinop(op,e1,e2) }
-  | op = unop e = expr %prec unary { Eunop(op,e) }
-  | e1 = expr POINT id = IDENT %prec st { Estruct(e1,id) }
-  | e = expr POINT LEN LEFTPAR RIGHTPAR %prec length { Elength(e) }
-  | e1 = expr LEFTSQ e2 = expr RIGHTSQ { Eindex(e1,e2) }
-  | t = IDENT EXCL LEFTSQ e = separated_list(COMMA,expr) RIGHTSQ { if t = "vec" then Evector(e) else raise Syntax_Error}
-  | e1 = IDENT LEFTPAR e = separated_list(COMMA,expr) RIGHTPAR {Ecall(e1,e)}
+  | i = CST { Econst(i, Lct($startpos,$endpos)) }
+
+  | TRUE { Ebool(true, Lct($startpos,$endpos)) }
+
+  | FALSE { Ebool(false, Lct($startpos,$endpos)) }
+
+  | id = IDENT { Evar(id, Lct($startpos,$endpos)) }
+
+  | bl = block {Eblock(bl, Lct($startpos,$endpos))}
+
+  | e1 = expr op = bop e2 = expr { Ebinop(op,e1,e2, Lct($startpos,$endpos)) }
+
+  | op = unop e = expr %prec unary { Eunop(op,e, Lct($startpos,$endpos)) }
+
+  | e1 = expr POINT id = IDENT %prec st { Estruct(e1,id, Lct($startpos,$endpos)) }
+
+  | e = expr POINT LEN LEFTPAR RIGHTPAR %prec length { Elength(e, Lct($startpos,$endpos)) }
+
+  | e1 = expr LEFTSQ e2 = expr RIGHTSQ { Eindex(e1, e2, Lct($startpos,$endpos)) }
+
+  | t = IDENT EXCL LEFTSQ e = separated_list(COMMA,expr) RIGHTSQ { if t = "vec" then Evector(e, Lct($startpos,$endpos)) else raise (Parsing.Parse_error)}
+
+  | e1 = IDENT LEFTPAR e = separated_list(COMMA,expr) RIGHTPAR {Ecall(e1, e, Lct($startpos,$endpos))}
+
   | LEFTPAR e = expr RIGHTPAR {e}
-  | t = IDENT EXCL LEFTPAR s = CHAIN RIGHTPAR { if t = "print" then Eprint(s) else raise Syntax_Error}
-  (*à complet*)
+
+  | t = IDENT EXCL LEFTPAR s = CHAIN RIGHTPAR { if t = "print" then Eprint(s, Lct($startpos,$endpos)) else raise (Syntax_Error 5)}
 ;
 
 %inline bop:
@@ -287,4 +293,4 @@ expr:
   | EXCL {Unot}
   | TIMES {Unstar}
   | POINTER {Unp}
-| POINTER MUT {Unmutp}
+  | POINTER MUT {Unmutp}
