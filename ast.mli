@@ -4,9 +4,9 @@ type ident = string
 type unop =
   | Uneg (* -e *)
   | Unot (* not e *)
-  | Unstar
-  | Unp
-  | Unmutp
+  | Unstar (*dereference*)
+  | Unp (*reference*)
+  | Unmutp (*reference mutable*)
 
 type binop =
   | Badd | Bsub | Bmul | Bdiv | Bmod    (* + - * / % *)

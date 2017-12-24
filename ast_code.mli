@@ -2,14 +2,17 @@ open Ast
 
 type pinstruction =
   | PIexpr of pexpr
-  | PImutExAssign of int * pexpr
-  | PImutStAssign of int * int * ((int * pexpr) list )
-  | PIexAssign of int * pexpr
-  | PIstAssign of int * int * ((int * pexpr) list )
+  | PImutExAssign of int * int * pexpr
+              (*the relative position with rbp, size of the expression, true pexpr*)
+  | PImutStAssign of int * int * ((int * int * pexpr) list )
+              (*the relative position with rbp of the assigned variable, size,list expr and offset*)
+  | PIexAssign of int * int * pexpr
+              (*the relative position with rbp, size of the expression, true pexpr*)
+  | PIstAssign of int * int * ((int * int * pexpr) list )
+              (*the relative position with rbp of the assigned variable, size,list expr and offset*)
   | PIwhile of pexpr * pblock
-  | PIreturn of pexpr
-  | PIreturnNull
-  | PISreturn of pcondition
+  | PIreturn of string * pexpr
+  | PIreturnNull of string
   | PIcond of pcondition
 and pexpr =
   | PEconst of int
@@ -17,12 +20,17 @@ and pexpr =
   | PEvar of int * int
   | PEbinop of binop * pexpr * pexpr
   | PEunop of unop * pexpr
-  | PEstruct of pexpr * int * int * int
+  | PEdereference of pexpr * int
+              (*expression, the true size of the variable*)
+  | PEreference of int
+              (*the relative position with rbp*)
+  | PEstruct of pexpr * int * int * int * bool
+              (*expression, size of struct, location of field, size of field, auto_dereference or not*)
   | PElength of pexpr
-  | PEindex of pexpr * pexpr * int
+  | PEindex of pexpr * pexpr 
   | PEprint of string
   | PEcall of ident * pexpr list * int
-  | PEvector of int * int
+  | PEvector of int * pexpr list
   | PEblock of pblock
 and pblock =
   | PCFullBlock of pinstruction list * pexpr

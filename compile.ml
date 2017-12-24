@@ -7,6 +7,8 @@ open Printf
 
 exception VarUndef of string
 exception FieldUndef of string
+exception GetReference
+exception Stack_overflow of string
 
 let ref frame_size = 0
 
@@ -20,24 +22,50 @@ module Vmap = Map.Make(String)
 
 type alloc = int Vmap.t
 
+(*hash table contains the offset of fields in struct*)
+
 let representation_env = (Hashtbl.create 20 : (string,structure) Hashtbl.t);;
+
+
+(*hash table contains the size of each field in struct*)
 
 let struct_env = (Hashtbl.create 20 : (string, (string * int) list) Hashtbl.t);;
 
+
+(*hash table contains the size of return value of a function*)
+
 let function_env = (Hashtbl.create 20 : (string,int) Hashtbl.t);;
+
+
+(*hash table contains the total size of parameter of a function
+
+also contains some label used for while and if*)
 
 let function_size_env = (Hashtbl.create 20 : (string,int) Hashtbl.t);;
 
+
+(*hash table contains the string which could be printed in the assembly*)
+
 let variable_env = (Hashtbl.create 20 : (string,string) Hashtbl.t);;
+
+
+(*hash table find the return label of each function*)
+
+let return_label_env = (Hashtbl.create 20 : (string,string) Hashtbl.t);;
 
 (*find the label for string (necessary to be distinct from each other and name of functions)*)
 
 let rec find_next_global n i =
-  let t = if i = 1 then "S" else "T" in
+  let t = if i = 1 then "S" else if i = 2 then "L" else "T" in
   if not (Hashtbl.mem function_env (t ^ string_of_int(n))) then
           (Hashtbl.add function_env (t ^ string_of_int(n)) 0; (t ^ string_of_int(n)))
   else find_next_global (n + 1) i
 
+let rec find_return_label n name =
+  if not (Hashtbl.mem function_env (name ^ string_of_int(n))) then
+          (Hashtbl.add function_env (name ^ string_of_int(n)) 0;
+          Hashtbl.add return_label_env name (name ^ string_of_int(n)))
+  else find_return_label (n + 1) name
 (*Calculate the size of each type*)
 
 let rec calculate_size typ =
@@ -50,12 +78,11 @@ let rec calculate_size typ =
   | Tmut t -> calculate_size t
 
 (*Convert from type struct into name of struct*)
-(*TODO:: added a boolean to know dereference*)
-let rec auto_dereference t =
+let auto_dereference t =
   match t with
-  | Tref (Tmut i) -> i (*true*)
-  | Tstruct _ | Tstructgeneric _ -> t (*false*)
-  | Tref i -> i (*true*)
+  | Tref (Tmut i) -> i, true
+  | Tstruct _ | Tstructgeneric _ -> t, false
+  | Tref i -> i, true
 
 
 let convert_into_struct_name ty =
@@ -68,27 +95,51 @@ let convert_into_struct_name ty =
 let rec calculate_relative_position l next =
   match l with
   | [] -> []
-  | (x, y) :: rest -> ( x, next) :: (calculate_relative_position l (next + y))
+  | (x, y) :: rest -> ( x, next) :: (calculate_relative_position rest (next + y))
 
 (*This function is used to calculate the size of complicated struct data
 and update the name and value to the hash table representation_env *)
+let print_struct l =
+  let print_field t =
+    fprintf stdout "%s: %d\n" (fst t) (snd t)
+  in
+  List.iter print_field l
 
 let calculate_rep p =
   let calculate_struct decl =
     match decl with
     | Decl_fun df -> Hashtbl.add function_env df.name_func (calculate_size df.return_func);
                     let total = List.fold_left (fun x y -> x + calculate_size y.type_arg) 0 df.def_func in
-                    Hashtbl.add function_size_env df.name_func total
+                    Hashtbl.add function_size_env df.name_func total;
+                    find_return_label 0 df.name_func;
+
     | Decl_struct ds -> let name = ds.name_struct in
                       let field_list = ds.def_struct in
-                      let total = List.fold_left (fun x y -> x + calculate_size y.type_struct_arg) 0 field_list in
-                      let fields = List.fold_right (fun y x -> (y.name_struct_arg, calculate_size y.type_struct_arg)::x) field_list [] in
-                      Hashtbl.add representation_env name {total = total; fields = (calculate_relative_position fields 0)};
+                      let start_index = if (List.length field_list) = 0 then 0
+                      else -(calculate_size (List.hd field_list).type_struct_arg) in
+                      let total = List.fold_left (fun x y -> x + calculate_size y.type_struct_arg)
+                                          0 field_list in
+                      let fields = List.fold_left
+                                  (fun x y -> (y.name_struct_arg, calculate_size y.type_struct_arg)::x) [] field_list in
+                      Hashtbl.add representation_env name
+                      {total = total; fields = calculate_relative_position (List.rev fields) 0};
+                      print_struct (calculate_relative_position (List.rev fields) 0);
                       let size = List.map (fun x -> x.name_struct_arg, calculate_size x.type_struct_arg) field_list in
                       Hashtbl.add struct_env name size
-  in List.map calculate_struct p
+
+  in List.iter calculate_struct p
 
 (*This function is dedicated for the declaration of function*)
+let compute_address env_alloc e =
+  match e with
+  | Evar x ->
+  begin
+  try
+    Vmap.find x env_alloc
+  with
+    Not_found -> raise (VarUndef x)
+  end
+  | _ -> raise GetReference
 
 let rec alloc_expr env_alloc env_typ next e =
   match e with
@@ -114,9 +165,17 @@ let rec alloc_expr env_alloc env_typ next e =
 
   | Eunop (o,e) ->
     let exp,fpmax = alloc_expr env_alloc env_typ next e in
-    PEunop (o, exp), fpmax
+    (match o with
+    | Unstar -> let true_type, _ = (auto_dereference (type_check_expr env_typ e)) in
+                let size = (calculate_size true_type) in
+                PEdereference (exp, size), fpmax
 
-  | Estruct (e,id) -> let ty = auto_dereference (type_check_expr env_typ e) in
+    | Unp | Unmutp -> let t =  compute_address env_alloc e in
+                PEreference(t), fpmax
+
+    | _ -> PEunop (o, exp), fpmax)
+
+  | Estruct (e,id) -> let ty,de_re = auto_dereference (type_check_expr env_typ e) in
                       let loc,size2 =
                       (try
                         let t = convert_into_struct_name ty in
@@ -130,18 +189,26 @@ let rec alloc_expr env_alloc env_typ next e =
                       ) in
                       let exp, fpmax = alloc_expr env_alloc env_typ next e in
 
-                      PEstruct(exp,calculate_size ty,loc,size2), fpmax
+                      PEstruct(exp,calculate_size ty,loc,size2,de_re), fpmax
 
-  (*| Elength of expr
-  | Eindex of expr * expr*)
+  | Elength ex -> let exp1, fpmax = alloc_expr env_alloc env_typ next ex in
+                  PElength (exp1), fpmax
+  | Evector ev -> let exp, fpmax = List.fold_right
+                      (fun t (exp, fpmax) -> let e1, fpmax1 = alloc_expr env_alloc env_typ next t in
+                                              e1::exp ,max fpmax fpmax1) ev ([],next) in
+                                              PEvector(List.length ev, exp), fpmax
+
+  | Eindex (exp1, exp2) -> let e1, fpmax1 = alloc_expr env_alloc env_typ next exp1 in
+                         let e2, fpmax2 = alloc_expr env_alloc env_typ next exp2 in
+                         PEindex(e1,e2),max fpmax1 fpmax2
 
   | Eprint s -> let t = find_next_global 0 0 in Hashtbl.add variable_env t s; PEprint(t), next
 
   | Ecall (id, e) -> let exp, fpmax = List.fold_right
                       (fun t (exp, fpmax) -> let e1, fpmax1 = alloc_expr env_alloc env_typ next t in
                                               e1::exp ,max fpmax fpmax1) e ([],next) in
-                                              PEcall (id, exp, Hashtbl.find function_env id), fpmax
-  (*| Evector of expr list*)
+                                              PEcall (id, exp, try Hashtbl.find function_env id with _ -> raise (Stack_overflow "-1")), fpmax
+
 
   | Eblock b -> let t, fpmax = alloc_block env_alloc env_typ next b in
                 PEblock(t), fpmax
@@ -154,50 +221,57 @@ and alloc_instruction env_alloc env_type next ins =
                             let te = type_check_expr env_type e in
                             Hashtbl.add env_type.evar id (te, true, Plein);
                             let size = calculate_size te in
-                            PImutExAssign (- next - size, t), (max (next + size) fpmax), Vmap.add id (- next - size) env_alloc
+                            PImutExAssign (- next - 8, size, t), (max (next + size) fpmax),
+                            Vmap.add id (- next - 8) env_alloc
 
   | IexAssign (id, e) -> let t, fpmax = (alloc_expr env_alloc env_type next e) in
                             let te = type_check_expr env_type e in
                             Hashtbl.add env_type.evar id (te, false, Plein);
                             let size = calculate_size te in
-                            PIexAssign (- next - size, t), (max (next + size) fpmax), Vmap.add id (- next - size) env_alloc
+                            PIexAssign (- next - 8, size, t), (max (next + size) fpmax),
+                            Vmap.add id (- next - 8) env_alloc
 
-  | ImutStAssign (id1, id2, e1) -> let st = Hashtbl.find representation_env id2 in
+  | ImutStAssign (id1, id2, e1) -> (try let st = Hashtbl.find representation_env id2 in
+                                   let st2 = Hashtbl.find struct_env id2 in
                                    Hashtbl.add env_type.evar id1 (Tstruct (id2), true, Plein);
                                    let l_exp, fpmax = List.fold_right (fun (x,y) (e,fp) ->
-                                              let t1,fp1 = alloc_expr env_alloc env_type next y in
-                                              let loc = List.assoc x st.fields in
-                                              (loc,t1)::e, max fp fp1) e1 ([],next)
-                                  in PImutStAssign ( - next - st.total, (max fpmax (next + st.total)),l_exp), (max fpmax (next + st.total)), Vmap.add id1 ( - next - st.total) env_alloc
+                                      let t1,fp1 = alloc_expr env_alloc env_type next y in
+                                      let loc = List.assoc x st.fields in
+                                      let size = List.assoc x st2 in
+                                      (loc,size,t1)::e, max fp fp1) e1 ([],next) in
+                                      PImutStAssign ( - next - 8, st.total,l_exp), (max fpmax (next + st.total)),
+                                      Vmap.add id1 ( - next - 8) env_alloc
+                                      with _ -> raise (Stack_overflow "1"))
 
-  | IstAssign (id1, id2, e1) -> let st = Hashtbl.find representation_env id2 in
+  | IstAssign (id1, id2, e1) -> (try (let st = Hashtbl.find representation_env id2 in
+                                let st2 = Hashtbl.find struct_env id2 in
                                    Hashtbl.add env_type.evar id1 (Tstruct (id2), false, Plein);
                                    let l_exp, fpmax = List.fold_right (fun (x,y) (e,fp) ->
-                                              let t1,fp1 = alloc_expr env_alloc env_type next y in
-                                              let loc = List.assoc x st.fields in
-                                              (loc,t1)::e, max fp fp1) e1 ([],next)
-                                  in PImutStAssign ( - next - st.total, (max fpmax (next + st.total)),l_exp), (max fpmax (next + st.total)), Vmap.add id1 ( - next - st.total) env_alloc
+                                      let t1,fp1 = alloc_expr env_alloc env_type next y in
+                                      let loc = List.assoc x st.fields in
+                                      let size = List.assoc x st2 in
+                                      (loc,size,t1)::e, max fp fp1) e1 ([],next) in
+                                      PImutStAssign ( - next - 8, st.total, l_exp), (max fpmax (next + st.total)),
+                                      Vmap.add id1 ( - next - 8) env_alloc)
+                                      with _ -> raise (Stack_overflow "0"))
 
   | Iwhile (e, b) -> let e1, fpmax1 = (alloc_expr env_alloc env_type next e) in
                        let b1, fpmax2 = (alloc_block env_alloc env_type next b) in
                        PIwhile (e1,b1), (max fpmax1 fpmax2), env_alloc
 
-  | Ireturn e -> let e1, fpmax = (alloc_expr env_alloc env_type next e) in
-                        PIreturn (e1), fpmax, env_alloc
-  | _ -> raise (VarUndef("successful"))
+  | ICreturn (f,e) -> let e1, fpmax = (alloc_expr env_alloc env_type next e) in
+                        PIreturn (f,e1), fpmax, env_alloc
 
-  (*| IreturnNull -> PIreturnNull , next, env_alloc
+  | ICreturnNull f -> PIreturnNull f, next, env_alloc
 
   | Icond c -> let c1, fpmax1 = alloc_condition env_alloc env_type next c in
                 PIcond(c1), fpmax1, env_alloc
 
-  | ISreturn c -> let c1, fpmax1 = alloc_condition env_alloc env_type next c in
-                PISreturn(c1), fpmax1, env_alloc*)
 
 and alloc_block env_alloc env_type next e =
   match e with
   | CFullBlock (ins, e1) ->
-    let new_env = {evar = Hashtbl.copy env_type.evar; level = 0} in
+    let new_env = {evar = Hashtbl.copy env_type.evar; level = 0; ref_lifespans = Hashtbl.copy env_type.ref_lifespans} in
     let ins1, size, env = List.fold_left (fun (x,y,z) exp ->
             let x1, y1, z1 = alloc_instruction z new_env y exp in
             x1::x, max y y1, z1) ([],next,env_alloc) ins in
@@ -205,7 +279,7 @@ and alloc_block env_alloc env_type next e =
     PCFullBlock (List.rev ins1, r), max size s
 
   | CBlock ins ->
-    let new_env = {evar = Hashtbl.copy env_type.evar; level = 0} in
+    let new_env = {evar = Hashtbl.copy env_type.evar; level = 0; ref_lifespans = Hashtbl.copy env_type.ref_lifespans} in
     let ins1, size, env = List.fold_left (fun (x,y,z) exp ->
           let x1, y1, z1 = alloc_instruction z new_env y exp in
           x1::x, max y y1, z1) ([],next,env_alloc) ins in
@@ -231,16 +305,18 @@ let alloc_decl d =
                   let n = df.name_func in
                   let ra = df.return_func in
                   let arg = df.def_func in
-                  let env_type = {evar = Hashtbl.create 17; level = 1} in
+                  let env_type = {evar = Hashtbl.create 17; level = 0;  ref_lifespans = Hashtbl.create 5} in
                   List.iter (fun x -> Hashtbl.add env_type.evar x.name_arg (x.type_arg,x.mut_arg,Plein)) arg;
                   let env_alloc, next = List.fold_right (fun x (e,n) -> Vmap.add x.name_arg (n+calculate_size x.type_arg) e,
-                                          (fprintf stdout "%d\n" (n + calculate_size x.type_arg);n + calculate_size x.type_arg)) arg (Vmap.empty, 8) in
+                                          (fprintf stdout "%d\n" (n + calculate_size x.type_arg);
+                                          n + calculate_size x.type_arg)) arg (Vmap.empty, 8) in
                   let b, fmax = alloc_block env_alloc env_type 0 bl in
                   PDecl_fun ({ name_pfunc = n;
                     size_pfunc = next - 8;
                     return_pfunc = ra;
                     body_pfunc = b;}, fmax)
   | Decl_struct ds -> Decl_struct ds
+
 
 let popn n = addq (imm n) (reg rsp)
 
@@ -249,25 +325,67 @@ let pushn n = subq (imm n) (reg rsp)
 let rec memmove octet =
   match octet with
   | i when i = 0 -> nop
-  | i -> movq (ind ~ofs:(i-8) rcx) (reg rdx) ++ movq (reg rdx) (ind ~ofs:(i-8) rbx) ++ memmove (octet-8)
+  | i -> movq (ind ~ofs:(8-i) rcx) (reg rdx) ++ movq (reg rdx) (ind ~ofs:(8-i) rbx) ++ memmove (octet-8)
+
+let rec memmove_topdown i octet =
+  if i < octet then movq (ind ~ofs:(-i) rcx) (reg rdx) ++
+                   movq (reg rdx) (ind ~ofs:(-i) rbx) ++
+                   memmove_topdown (i+8) octet
+  else nop
 
 let rec compile_expr e =
   match e with
   | PEconst i -> movq (imm i) (reg rax) ++ pushq (reg rax)
   | PEbool b -> pushq (imm b)
-  | PEvar (v,size) -> pushn size ++ leaq (ind ~ofs:0 rsp) (rbx) ++ leaq (ind ~ofs:v rbp) (rcx) ++ memmove size
+  | PEvar (v,size) -> pushn size ++ leaq (ind ~ofs:(size-8) rsp) (rbx) ++ leaq (ind ~ofs:v rbp) (rcx) ++ memmove size
   | PEprint (s) ->  movq (ilab s) (reg rdi) ++ pushq (reg rax)
                   ++ movq (imm 0) (reg rax) ++ call "printf" ++ popq rax
   | PEbinop (o,exp1,exp2) -> compile_binop_expr o exp1 exp2
   | PEunop (o,e1) -> compile_unop_expr o e1
-  | PEcall (id, exp, size) -> let fcall = List.fold_left (fun code e -> code ++ compile_expr e) nop exp in
+  | PEdereference (e1, size) -> compile_expr e1 ++ popq rax ++
+                              pushn size ++ leaq (ind ~ofs:(size-8) rsp) rbx ++
+                              leaq (ind ~ofs:0 rax) (rcx) ++ memmove size
+  | PEreference ad -> leaq (ind ~ofs:ad rbp) rax ++ pushq (reg rax)
+  | PEstruct (e1, size_st, offset, size_f, dr) ->
+      let pre_code = compile_expr e1 ++
+                    (if dr then popq rax ++ pushn size_st ++
+                                leaq (ind ~ofs:(size_st - 8) rsp) (rbx) ++
+                                leaq (ind ~ofs:0 rax) (rcx) ++ memmove size_st
+                    else nop) in
+      let copy_code = leaq (ind ~ofs:(size_st - 8) rsp) (rbx) ++
+                      leaq (ind ~ofs:(size_st - 8 + offset) rsp) (rcx) ++
+                      memmove_topdown 0 size_f ++ popn (size_st - size_f) in
+      pre_code ++ copy_code
+  | PEcall (id, exp, size) -> if(id = "print_int") then (fprintf stdout "size test%d\n" (List.length exp));
+                              (try let fcall = List.fold_left (fun code e -> code ++ compile_expr e) nop exp in
                               pushn size ++ fcall ++ call id ++ popn (Hashtbl.find function_size_env id)
+                              with _ -> raise (Stack_overflow ("2")))
+  (*| PElength exp -> compile_expr exp ++ popn 8
+  | PEindex (exp1, exp2) -> *)
   | _ -> nop
 
 and compile_ins ins =
   match ins with
   | PIexpr e -> compile_expr e
+  | PImutExAssign (offset, size, e) -> compile_expr e ++ leaq (ind ~ofs:(size-8) rsp) (rcx) ++
+                                      leaq (ind ~ofs:offset rbp) (rbx) ++
+                                      memmove size ++ popn size
+  | PIexAssign (offset, size, e) -> compile_expr e ++ leaq (ind ~ofs:(size-8) rsp) (rcx) ++
+                                      leaq (ind ~ofs:offset rbp) (rbx) ++
+                                      memmove size ++ popn size
+  | PImutStAssign (offset, size, list_exp) -> List.fold_left (fun code ex -> code ++ compile_field_init ex offset) nop list_exp
+  | PIstAssign (offset, size, list_exp) -> List.fold_left (fun code ex -> code ++ compile_field_init ex offset) nop list_exp
+  | PIwhile (e,b) -> let label1 = find_next_global 0 2 in
+                    let label2 = find_next_global 0 2 in
+                    (label label1) ++ compile_expr e ++ popq rax ++
+                    cmpq (imm 0) (reg rax) ++ je label2 ++
+                    compile_block b ++ jmp label1 ++ (label label2)
   | PIcond c -> compile_condition c
+  | PIreturn (f,e) -> (try let return_label = Hashtbl.find return_label_env f in compile_expr e ++ jmp return_label
+                      with _ -> raise (Stack_overflow "3"))
+  | PIreturnNull f -> (try let return_label = Hashtbl.find return_label_env f in
+                      jmp return_label
+                      with _ -> raise (Stack_overflow "4"))
   | _ -> nop
 
 and compile_condition c =
@@ -279,7 +397,13 @@ and compile_condition c =
                               let b2 = compile_block block2 in
                               t1 ++ popq rax ++ cmpq (imm 0) (reg rax) ++ je label1 ++
                               b1 ++ jmp label2 ++ (label label1) ++ b2 ++ (label label2)
-  (*| PCnestedIf e, block, cond ->*)
+  | PCnestedIf (e, block1, cond) -> let label1 = find_next_global 0 1 in
+                              let label2 = find_next_global 0 1 in
+                              let t1 = compile_expr e in
+                              let b1 = compile_block block1 in
+                              let b2 = compile_condition cond in
+                              t1 ++ popq rax ++ cmpq (imm 0) (reg rax) ++ je label1 ++
+                              b1 ++ jmp label2 ++ (label label1) ++ b2 ++ (label label2)
 
 and compile_block bl =
   (match bl with
@@ -330,40 +454,47 @@ and compile_binop_complex_arithmetic op t1 t2 =
 and compile_assign e1 t2 =
   t2 ++ *)
 
-(*TODO:: Complete unop operation*)
 and compile_unop_expr o e =
   let op = match o with
   | Uneg -> negq
   | Unot -> notq
-  (*| Unstar ->
-  | Unp
-  | Unmutp*)
   in
   compile_expr e ++ popq rax ++ op (reg rax) ++ pushq (reg rax)
 
+and compile_field_init e gofs =
+  let offset, size, e1 = e in
+  compile_expr e1 ++ leaq (ind ~ofs:(gofs-offset) rbp) (rbx) ++
+  leaq (ind ~ofs:(size-8) rsp) (rcx) ++ memmove size ++
+  popn size
+
 let compile_decl d =
   match d with
-  | PDecl_fun (func, fpmax) ->
+  | PDecl_fun (func, fpmax) -> (try
+    let size_return = Hashtbl.find function_env func.name_pfunc in
+
+    let return_address = 8 + (Hashtbl.find function_env func.name_pfunc) + size_return in
+
+    let return_label = Hashtbl.find return_label_env func.name_pfunc in
+
     let code = (label func.name_pfunc) ++
     pushq (reg rbp) ++
     movq (reg rsp) (reg rbp) ++
     pushn fpmax ++
     compile_block func.body_pfunc ++
+    (label return_label) ++
+    leaq (ind ~ofs:(size_return-8) rsp) (rcx) ++
+    leaq (ind ~ofs:return_address rbp) (rbx) ++ memmove size_return ++
     leave ++
     ret in
     if func.name_pfunc = "main" then code, nop
     else nop, code
+    with _ -> raise (Stack_overflow "8"))
   | Decl_struct s -> nop, nop
-
-(*let int_expr exp =
-  let rec comprec env next
-    | Econst n -> movq (imm n) (reg rdi)
-    | Ebool b -> let temp = if b then 1 else 0 in movq (imm temp) (reg rdi)
-    | Ebinop*)
 
 let compile_program p ofile =
   calculate_rep p;
   let p1 = List.map alloc_decl p in
+  let codemain, codefun = nop, nop in
   let codemain, codefun = List.fold_left (fun (codem, codef) f ->
                           let c1, c2 = compile_decl f in codem ++ c1, codef ++ c2) (nop,nop) p1 in
   let p = {text =

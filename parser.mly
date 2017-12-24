@@ -163,7 +163,7 @@ typ:
   | t = IDENT { find_type t }
   | name = IDENT LQ t = typ GQ { Tstructgeneric(name,t) }
   | POINTER t = typ {Tref(t)}
-  | POINTER MUT t = typ {Tmut(t)}
+  | POINTER MUT t = typ {Tref (Tmut(t))}
 ;
 
 argument:

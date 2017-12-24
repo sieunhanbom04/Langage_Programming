@@ -4,9 +4,9 @@ open Parser
 open Ast
 open Printf
 open Compile
+open Tc
 
 let filename = "tung.txt"
-let filename = "tests/syntax/bad/testfile-while-1.rs"
 
 let localisation pos =
   let l = pos.pos_lnum in
@@ -63,7 +63,8 @@ let () =
     let p = Parser.prog Lexer.token buf in
     close_in f;
     print_ast p;
-    (*compile_program p (Filename.chop_suffix filename ".txt" ^ ".s");*)
+    check_main p;
+    compile_program p (Filename.chop_suffix filename ".txt" ^ ".s");
   with
     | Lexer.Lexing_error c -> localisation (Lexing.lexeme_start_p buf);
 	                             eprintf "Erreur lexicale: %s@.\n" c;
