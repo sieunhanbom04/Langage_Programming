@@ -151,8 +151,9 @@ let rec usable_as t1 t2 = if t1 = t2 then true else match (t1, t2) with (*predic
 	|Tmut t , Tmut t' -> usable_as t t' 
 	|Tmut t , t' -> usable_as t t'
 	|t, Tmut t' when not (is_move t) -> usable_as t t'
+	|Tstructgeneric (_,Tnull) , Tstructgeneric (_,t')  when (is_move t')-> true 
 	|Tstructgeneric (_,t) , Tstructgeneric (_,t')  -> usable_as t t' 
-	| _ -> false
+	| t, t' -> print_endline ((str_type t) ^ " not usable as "^(str_type t'));false
 
 let rec assignable t1 t2 = if t1 = t2 then true else match (t1, t2) with (*predicate on whether a variable's value of type t1 can be assigned to a variable of type t2*)
 	|t , Tmut t' -> assignable t t' 
@@ -162,7 +163,7 @@ let rec assignable t1 t2 = if t1 = t2 then true else match (t1, t2) with (*predi
 let rec type_check_instr env = function (*type checking for instructions*)
 
   | Inothing l -> TInothing (l, Tnull)
-  | Iexpr (e, l) -> print_endline "typechecking Iexpr"; let te = type_check_expr env e in TIexpr (te, l, Tnull)
+  | Iexpr (e, l) -> let te = type_check_expr env e in TIexpr (te, l, Tnull)
   | IexAssign (id, e, m, loc) -> let texp = type_check_expr env e in 
   																let typ_texp = extract_type_expr texp in
   																Hashtbl.add env.evar id ((if m then (match typ_texp with Tmut _ -> typ_texp |_ -> Tmut typ_texp) else typ_texp), m)(*; print_endline ("tc : adding variable " ^ id) *); 
@@ -196,14 +197,14 @@ let rec type_check_instr env = function (*type checking for instructions*)
   } in
 { loc_start = loc; loc_end = loc; loc_ghost = false })) (***This will correspond to Ireturn and IreturnNull but they shouldn't occur***)
 *)
-and type_check_expr env e= print_endline "typechecking an expression";match e with
+and type_check_expr env e= match e with
 
   | Econst (i, l) -> TEconst(i, l, Tint)
   | Ebool (b , l) -> TEbool(b , l ,Tbool)
   | Evar (id, l) -> if (Hashtbl.mem env.evar id) then let xx, _ = (Hashtbl.find env.evar id) in
   								TEvar (id, l, xx) 
   								else raise (Type_Error ("Unbound variable " ^ id, l))
-  | Ebinop (b, e1, e2, loc) -> print_endline "static checking binop expr"; let t, te1, te2 = type_check_binop env b e1 e2 loc in
+  | Ebinop (b, e1, e2, loc) -> let t, te1, te2 = type_check_binop env b e1 e2 loc in
   														TEbinop (b , te1 , te2, loc, t)
   | Eunop (u, e, loc) -> let t, te = type_check_unop env u e loc in
   											 TEunop(u, te, loc, t)
@@ -238,9 +239,8 @@ and type_check_expr env e= print_endline "typechecking an expression";match e wi
   										TEblock (tbl, loc, extract_type_block tbl)
 
 and type_check_block env = function
-  | CFullBlock (l, exp, loc) -> print_endline "type checking CFullBlock"; let lt = List.map (fun x -> type_check_instr env x ) l in
+  | CFullBlock (l, exp, loc) ->  let lt = List.map (fun x -> type_check_instr env x ) l in
 																let texp = type_check_expr env exp in
-																print_string "CfullBlock typed : ";print_type (extract_type_expr texp);
 																TCFullBlock (lt, texp, loc, extract_type_expr texp)
   | CBlock (l, loc) -> let lt = List.map (type_check_instr env) l in 
 								if List.length l = 0 then TCBlock (lt, loc, Tnull) else
@@ -275,7 +275,7 @@ and type_check_unop env u e loc = let texp = type_check_expr env e in
   | Uneg when te = Tint -> (Tint, texp) (* -e *)
   | Unot when te = Tbool -> (Tbool, texp)(* not e *)
   | Unstar -> let tr = (match te with | Tref ty -> ty | Tmut Tref ty -> ty | _ -> raise (Type_Error ("Dereferencing operator applied to non reference value", loc)) ) in (tr, texp)
-  | Unp -> (match e with Eunop(Unstar, _, _) |Evar _ -> () | _ -> raise (Type_Error ("Reference cannot be created for non variables", loc))); (Tref te, texp) 
+  | Unp -> if not (is_lvalue env e) then raise (Type_Error ("References can only be created for left values", loc)); (Tref te, texp) 
   | Unmutp -> if not (is_lvalue env e) then raise (Type_Error ("References can only be created for leftvalues", loc));
 							if not (is_mutable env e) then raise (Type_Error ("Mutable references can only be created for mutable values", loc));
 							(Tref (match te with Tmut _ -> te |_-> Tmut te), texp) (************************************* *)
@@ -310,13 +310,13 @@ and is_mutable env exp = let texp = extract_type_expr (type_check_expr env exp) 
 and is_lvalue env = function
 	| Evar (id, _) when Hashtbl.mem env.evar id && (let t,m = Hashtbl.find env.evar id in m || (match below t with Tstructgeneric _ -> true |_ -> false)) -> true
 	| Eindex (v, e, _) -> is_mutable env v || (let tv = extract_type_expr (type_check_expr env v) in match tv with 
-											(*|Tref Tstructgeneric _*) |Tref Tmut Tstructgeneric _ -> true |_ -> false)
+											(*|Tref Tstructgeneric _*) |Tref Tmut Tstructgeneric _ |Tstructgeneric _ -> true |_ -> false)
 	| Estruct (e, id, _) -> is_mutable env e || (match extract_type_expr (type_check_expr env e) with |Tmut _(*| Tref Tstruct _*) | Tref Tmut Tstruct _  -> true | _ -> false)
 	| Eunop (Unstar, eref, _) -> let teref = extract_type_expr (type_check_expr env eref) in 
 														(match teref with | Tref _ |Tmut Tref _ -> true | _ -> false )
 	| _ -> false
 
-and check_struct_fields env larg lid loc = if not (List.for_all (fun x -> List.exists (fun y -> x.name_struct_arg = fst y && x.type_struct_arg = extract_type_expr (type_check_expr env (snd y))) lid) larg) then raise (Type_Error ("Incoherent structure assignment", loc))
+and check_struct_fields env larg lid loc = if not (List.for_all (fun x -> List.exists (fun y -> x.name_struct_arg = fst y && (usable_as (extract_type_expr (type_check_expr env (snd y))) x.type_struct_arg)) lid) larg) then raise (Type_Error ("Incoherent structure assignment", loc))
 
 
 let rec check_nodouble s = function
@@ -352,13 +352,13 @@ let type_check_fndecl df = let lnames = List.map (fun x -> x.name_arg) df.def_fu
 
 let type_check_decl = function
 	|Decl_fun df -> type_check_fndecl df
-	|Decl_struct ds -> List.iter (fun x -> 
+	|Decl_struct ds -> Hashtbl.add genv_struct ds.name_struct ds.def_struct;
+											List.iter (fun x -> 
 								if not (check_welltyped x.type_struct_arg) 
 								then raise (Type_Error ("Incorrectly typed field in structure declaration", x.loc_struct_arg)) ; 
 								
 								if not (check_noborrow x.type_struct_arg) 
 								then raise (Type_Error ("Borrow types are not allowed in structure fields", x.loc_struct_arg))) ds.def_struct;
-											Hashtbl.add genv_struct ds.name_struct ds.def_struct;
 											TDecl_struct ds
 
 

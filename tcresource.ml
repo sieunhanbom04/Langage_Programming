@@ -23,18 +23,18 @@ type env = {mutable evar : env_var; mutable level : int; mutable ref_lifespans :
 
 exception RType_Error of string * location
 
-let is_move = function
+let is_move = function 
 	| Tref Tmut _ | Tstructgeneric _ | Tstruct _ -> true
 	|_ -> false
 
-let check_ownership env v = match v with
-	|TEvar (w, l, _) -> let _, _, stat = Hashtbl.find env.evar w in if stat = Vide then raise (RType_Error ("Access to void variable : " ^ w, l))
+let check_ownership env v = match v with 
+	|TEvar (w, l, _) -> let _, _, stat = Hashtbl.find env.evar w in if stat = Vide then raise (RType_Error ("Access to void variable : " ^ w, l)) 
 	| _ -> ()
 
 
-let check_and_delete_ownership env e = match e with
-	|TEvar (v, l, _) -> let tv,mv,stat = Hashtbl.find env.evar v in
-													if stat = Vide then raise (RType_Error ("Access to void variable : " ^ v, l));
+let check_and_delete_ownership env e = match e with 
+	|TEvar (v, l, _) -> let tv,mv,stat = Hashtbl.find env.evar v in 
+													if stat = Vide then raise (RType_Error ("Access to void variable : " ^ v, l)); 
 													if is_move tv then Hashtbl.replace env.evar v (tv, mv, Vide); print_endline ("ownership deleted for variable : "^v)
 	| TEindex (v, _, _, _) -> check_ownership env v
   | _ -> ()
@@ -51,7 +51,7 @@ let rec str_type = function (*a function that turns a type into a string, mainly
 let print_type t = print_string (str_type t) (*a function that prints types*)
 
 
-let rec check_noborrow = function
+let rec check_noborrow = function 
 	|Tnull | Tint | Tbool |Tstruct _ -> true (* Structure fields are guaranteed not to contain borrows*)
 	|Tstructgeneric (_, t) -> check_noborrow t
 	|Tmut t -> check_noborrow t
@@ -59,15 +59,15 @@ let rec check_noborrow = function
 
 
 let rec usable_as t1 t2 = if t1 = t2 then true else match (t1, t2) with (*predicate on whether a variable of type t1 can be used as t2*)
-	|Tref t , Tref t' -> usable_as t t'
-	|Tmut t , Tmut t' -> usable_as t t'
+	|Tref t , Tref t' -> usable_as t t' 
+	|Tmut t , Tmut t' -> usable_as t t' 
 	|Tmut t , t' -> usable_as t t'
 	|t, Tmut t' when not (is_move t) -> usable_as t t'
-	|Tstructgeneric (_,t) , Tstructgeneric (_,t')  -> usable_as t t'
+	|Tstructgeneric (_,t) , Tstructgeneric (_,t')  -> usable_as t t' 
 	| _ -> false
 
 let rec assignable t1 t2 = if t1 = t2 then true else match (t1, t2) with (*predicate on whether a variable's value of type t1 can be assigned to a variable of type t2*)
-	|t , Tmut t' -> assignable t t'
+	|t , Tmut t' -> assignable t t' 
 	| _ -> usable_as t1 t2
 
 
@@ -75,48 +75,48 @@ let rec rtype_check_instr env = function (*type checking for instructions*)
 
   | TInothing _ -> ()
   | TIexpr (e, _, _) -> rtype_check_expr env e
-  | TIexAssign (id, te, m, loc, t) -> let ty = extract_type_expr te in Hashtbl.add env.evar id ((if m then (match ty with Tmut _ -> ty |_ -> Tmut ty) else ty), m, Plein)(*; print_endline ("tc : adding variable " ^ id) *);
+  | TIexAssign (id, te, m, loc, t) -> let ty = extract_type_expr te in Hashtbl.add env.evar id ((if m then (match ty with Tmut _ -> ty |_ -> Tmut ty) else ty), m, Plein)(*; print_endline ("tc : adding variable " ^ id) *); 
 													rtype_check_expr env te;
-
-														check_and_delete_ownership env te;
-												begin match te with
-												|TEunop (Unmutp, TEvar (var, l, tt), _, _) -> if m then check_ownership env (TEvar (var, l, tt));
-												let a,b,stat = Hashtbl.find env.evar var in
-												if stat = Borrowmut then raise (RType_Error ("Only one mutable Borrow can be made of a variable", l)) ;
-
-
+													
+														check_and_delete_ownership env te; 
+												begin match te with 
+												|TEunop (Unmutp, TEvar (var, l, tt), _, _) -> if m then check_ownership env (TEvar (var, l, tt)); 
+												let a,b,stat = Hashtbl.find env.evar var in 
+												if stat = Borrowmut then raise (RType_Error ("Only one mutable Borrow can be made of a variable", l)) ; 
+												
+												
 if m then (if not (ris_mutable env (TEvar (var, l, tt))) then raise (RType_Error ("Cannot mutably borrow a non mutable variable", l))) else (if stat = Vide then raise (RType_Error ("Cannot borrow a void variable", l)));
-
-
+												
+												
 												Hashtbl.replace env.evar var (a, b, Borrowmut);
 												Hashtbl.add env.ref_lifespans id env.level
-
+												
 												|TEunop (Unp, TEvar (var, l, tt), _, _) -> if m then check_ownership env (TEvar (var, l, tt));
-												let a,b,stat = Hashtbl.find env.evar var in
+												let a,b,stat = Hashtbl.find env.evar var in 
 												Hashtbl.replace env.evar var (a, b, (if stat = Borrowmut then stat else Borrow)); print_endline ("variable "^var^" is Borrowed");
 												Hashtbl.add env.ref_lifespans id env.level
 												|_ -> ()
-												end
+												end	
 
   | TIstAssign (idv, idst, lid, m, _, _) -> List.iter (fun x -> check_and_delete_ownership env (snd x)) lid;
 										 												Hashtbl.add env.evar idv (Tstruct idst, m, Plein)
 
   | TIwhile (texpr, tbl, _, _) -> rtype_check_expr env texpr; rtype_check_block env tbl
-  | TICreturn _ | TICreturnNull _ -> ()
+  | TICreturn _ | TICreturnNull _ -> () 
   | TIcond (tcond, _, _) -> rtype_check_if env tcond
 	| _ -> () (***This will correspond to Ireturn and IreturnNull but they shouldn't occur***)
 
 and rtype_check_expr env = function
 
   | TEconst _ | TEbool _ | TEvar _ -> ()
-  | TEbinop (b, te1, te2, _, _) -> print_endline "resource checking binop expr"; rtype_check_binop env b te1 te2
+  | TEbinop (b, te1, te2, _, _) -> rtype_check_binop env b te1 te2
   | TEunop (u, te, _, _) -> rtype_check_unop env u te
-  | TEstruct (te, id, _, _) -> check_and_delete_ownership env te (*********************************************)
+  | TEstruct (te, id, _, _) -> check_ownership env te (*********************************************)
 
 
   | TElength (te, _, _) -> ()
   | TEindex (tv, te, _, _) -> check_ownership env tv
-
+  
 	| TEcall (id, l, _, _) -> List.iter (fun x -> check_and_delete_ownership env x) l
 
   | TEprint _ -> ()
@@ -127,16 +127,16 @@ and rtype_check_expr env = function
   | TEblock (bl, _, _) -> rtype_check_block env bl
 
 and rtype_check_block env = function
-  | TCFullBlock (l, exp, _, _) -> env.level <- env.level +1;
+  | TCFullBlock (l, exp, _, _) -> env.level <- env.level +1; 
 														List.iter (fun x -> rtype_check_instr env x; () ) l;
 														rtype_check_expr env exp;
 														env.level <- env.level -1
-  | TCBlock (l, _, _) -> env.level <- env.level +1;
-								List.iter (rtype_check_instr env) l;
+  | TCBlock (l, _, _) -> env.level <- env.level +1; 
+								List.iter (rtype_check_instr env) l; 
 								env.level <- env.level -1
 
 
-and rtype_check_if env = function
+and rtype_check_if env = function 
   | TCif (e, b1, None, _, _) -> rtype_check_expr env e;
 				  														rtype_check_block env b1;
   | TCif (e, b1, Some (b2), _, _) -> rtype_check_expr env e;
@@ -149,35 +149,35 @@ and rtype_check_if env = function
 
 and rtype_check_unop env u e = rtype_check_expr env e; match u with
   | Uneg | Unot | Unp | Unmutp -> ()
-  | Unstar -> (match e with TEvar (v, l, _) -> print_endline "checking reference lifespan";if env.level < (Hashtbl.find env.ref_lifespans v) then raise (RType_Error ("Use of an expired reference", l)) |_ -> ())
+  | Unstar -> (match e with TEvar (v, l, _) -> print_endline "checking reference lifespan";if env.level < (Hashtbl.find env.ref_lifespans v) then raise (RType_Error ("Use of an expired reference", l)) |_ -> ()) 
 (*  | _ -> raise (RType_Error "Incorrect unary operator ") *)
 
 
 and rtype_check_binop env b e1 e2 = match b with
   | Badd | Bsub | Bmul | Bdiv | Bmod | Beq | Bneq | Blt | Ble | Bgt | Bge | Band | Bor -> ()
 
-	|Bassign -> print_endline "Checking binop assignment";(match e2 with
-										|TEunop(Unmutp, (TEvar (v, loc, _)), _, _) -> let tv, mv, statv = Hashtbl.find env.evar v in
+	|Bassign -> (match e2 with 
+										|TEunop(Unmutp, (TEvar (v, loc, _)), _, _) -> let tv, mv, statv = Hashtbl.find env.evar v in 
 																								if statv = Borrowmut then raise (RType_Error ("Only one mutable Borrow can be made of a variable", loc));
 																								if statv = Vide then raise (RType_Error ("Cannot borrow a void variable", loc));
 																								Hashtbl.replace env.evar v (tv, mv, Borrowmut);
 																								(match e1 with TEvar(w, _, _) -> Hashtbl.replace env.ref_lifespans w env.level |_ -> ())
 
-										|TEunop(Unp, (TEvar (v, loc, _)), _, _) -> let tv, mv, statv = Hashtbl.find env.evar v in
+										|TEunop(Unp, (TEvar (v, loc, _)), _, _) -> let tv, mv, statv = Hashtbl.find env.evar v in 
 																							if statv = Vide then raise (RType_Error ("Cannot borrow a void variable", loc));
-
+																	
 																							Hashtbl.replace env.evar v (tv, mv, (if statv = Borrowmut then statv else Borrow));
-
+																							
 																							(match e1 with TEvar (w, _, _) -> Hashtbl.replace env.ref_lifespans w env.level |_ -> ())
-
-										|TEvar (v, loc, _)  ->	let tv, mv, statv = Hashtbl.find env.evar v in
+	
+										|TEvar (v, loc, _)  ->	let tv, mv, statv = Hashtbl.find env.evar v in 
 																if statv <> Plein then raise (RType_Error ("Cannot assign the content of a non owning variable", loc));
-																Hashtbl.replace env.evar v (tv, mv, Vide);
+																if (is_move tv) then Hashtbl.replace env.evar v (tv, mv, Vide)
 										| _ -> ()
-													(**Should we manage assignments to vector cells ???**)
+													(**Should we manage assignments to vector cells ???**)										
 
 							);
-							(match e1 with
+							(match e1 with 
 									|TEvar (w, loc, _) -> let tw, mw, statw = Hashtbl.find env.evar w in if (statw = Borrow || statw = Borrowmut) then raise (RType_Error ("Cannot modify a borrowed variable", loc)) else print_endline ("variable "^w^" is not Borrowed");
 									Hashtbl.replace env.evar w (tw, mw, Plein)
 							| _ -> ()
@@ -194,8 +194,8 @@ and ris_mutable env exp = match (extract_type_expr exp) with |Tmut _ | Tref Tmut
 
 
 let rtype_check_fndecl df = let env = {evar = Hashtbl.create 17; level = 0; ref_lifespans = Hashtbl.create 5} in
-														List.iter (fun x -> Hashtbl.add env.evar x.name_arg (x.type_arg, x.mut_arg, Plein)) df.def_tfunc	;
-														Hashtbl.add genv_func df.name_tfunc {args=df.def_tfunc; return = df.return_tfunc} ;
+														List.iter (fun x -> Hashtbl.add env.evar x.name_arg (x.type_arg, x.mut_arg, Plein)) df.def_tfunc	; 
+														Hashtbl.add genv_func df.name_tfunc {args=df.def_tfunc; return = df.return_tfunc} ; 
 														rtype_check_block env df.body_tfunc;
 														print_string ("function " ^ df.name_tfunc ^ "(" ); List.iter (fun a -> print_type a.type_arg) df.def_tfunc;print_endline ")"
 
@@ -208,3 +208,8 @@ let rtype_check_decl = function
 
 let resource_type_check = List.iter rtype_check_decl
 (*take a program and check their function*)
+	 
+
+
+
+

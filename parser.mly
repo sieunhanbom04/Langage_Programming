@@ -5,7 +5,7 @@
   open Ast
   open Printf
   open Parsing
-  
+
   let table_type = ["i32",Tint;
                     "bool",Tbool;
                     ]
@@ -119,7 +119,6 @@
 %token EOF
 %token POINTER
 %token LEFTSQ RIGHTSQ
-%token LEN
 %token POINT
 
 
@@ -216,10 +215,10 @@ instruction_without_block:
   | LET id = IDENT ASSIGN e = expr {IexAssign(id, e, false, Lct($startpos,$endpos))}
 
   | LET MUT id = IDENT ASSIGN idstruct = IDENT BEGIN var = separated_list(COMMA, assign) END
-      {IstAssign(id, idstruct, var, false, Lct($startpos,$endpos))}
+      {IstAssign(id, idstruct, var, true, Lct($startpos,$endpos))}
 
   | LET id = IDENT ASSIGN idstruct = IDENT BEGIN var = separated_list(COMMA, assign) END
-      {IstAssign(id, idstruct, var, true, Lct($startpos,$endpos))}
+      {IstAssign(id, idstruct, var, false, Lct($startpos,$endpos))}
 
   | RETURN { IreturnNull (Lct ($startpos,$endpos)) }
 
@@ -258,7 +257,7 @@ expr:
 
   | e1 = expr POINT id = IDENT %prec st { Estruct(e1,id, Lct($startpos,$endpos)) }
 
-  | e = expr POINT LEN LEFTPAR RIGHTPAR %prec length { Elength(e, Lct($startpos,$endpos)) }
+  | e = expr POINT id = IDENT LEFTPAR RIGHTPAR %prec length { if id = "len" then Elength(e, Lct($startpos,$endpos)) else raise Parsing.Parse_error}
 
   | e1 = expr LEFTSQ e2 = expr RIGHTSQ { Eindex(e1, e2, Lct($startpos,$endpos)) }
 

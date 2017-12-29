@@ -81,12 +81,12 @@ let rec calculate_size typ =
   | Tmut t -> calculate_size t
 
 (*check the auto dereference in program*)
-
-let auto_dereference t =
+(*reminder:: this function is modified before test vector*)
+let rec auto_dereference t =
   match t with
-  | Tref (Tmut i) -> i, true
+  | Tmut x -> auto_dereference x
   | Tstruct _ | Tstructgeneric _ -> t, false
-  | Tref i -> i, true
+  | Tref i -> let t1, dr = auto_dereference i in t1, true
 
 (*Convert from type struct into name of struct*)
 
@@ -387,12 +387,11 @@ let rec compile_expr e =
                                 movq (imm size) (reg rdx) ++ imulq (reg rdx) (reg rax) ++
                                 movq (imm (size - 8)) (reg rdx) ++ addq (reg rdx) (reg rax) ++
                                 addq (reg rax) (reg rcx) ++ pushn size ++
-                                movq (ind ~ofs:(size - 8) rsp) (reg rbx) ++ memmove size
+                                leaq (ind ~ofs:(size - 8) rsp) rbx ++ memmove size
 
 
   | PEvector (size, size_field, exp) -> let code, i = List.fold_left (fun (x,y) ex ->
-                                        x ++ (copy_vec ex size_field y), y + size_field) (nop,0) exp in
-
+                                        x ++ (copy_vec ex size_field y), y + 1) (nop,0) exp in
                                         pushq (imm size) ++ movq (imm (size*size_field)) (reg rdi) ++
                                         pushq (reg rax) ++ movq (imm 0) (reg rax) ++ call "malloc" ++
                                         movq (reg rax) (reg rbx) ++ popq rax ++ pushq (reg rbx) ++ code

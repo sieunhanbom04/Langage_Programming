@@ -14,8 +14,7 @@
    "return",RETURN;
    "struct",STRUCT;
    "true",TRUE;
-   "while",WHILE;
-   "len",LEN]
+   "while",WHILE]
 
    let assoc_variable s = try List.assoc s table_kw with Not_found -> IDENT (s)
 
