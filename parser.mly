@@ -5,7 +5,7 @@
   open Ast
   open Printf
   open Parsing
-
+  
   let table_type = ["i32",Tint;
                     "bool",Tbool;
                     ]
@@ -50,9 +50,9 @@
                       if (List.length t) = 0 then CBlock([],loc)
                       else (*(check_valid_block (List.rev (List.tl (List.rev l)));*)
                       (check_last_ins (List.hd (List.rev l));
-                      let x = List.hd rev_t in
+                      let x = List.hd (List.rev (List.concat l)) in
                         match x with
-                        | Iexpr (e,l) ->  CFullBlock((List.rev (List.tl rev_t)),e,loc)
+                        | Iexpr (e,l) ->  CFullBlock(remove_null_instruction (List.rev (List.tl rev_t)),e,loc)
                         | _ -> CBlock (t,loc))
 
 

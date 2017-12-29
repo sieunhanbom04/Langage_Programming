@@ -3,10 +3,12 @@ open Format
 open Parser
 open Ast
 open Printf
+open Location
 open Compile
-open Tc
+open Tcstatic
+open Tcresource
 
-let filename = "tung.txt"
+let filename = "tung.rs"
 
 let localisation pos =
   let l = pos.pos_lnum in
@@ -18,7 +20,7 @@ let localisation_modify pos =
   let c = pos.pos_cnum - pos.pos_bol + 1 in
   eprintf "File \"%s\", line %d, characters %d-%d:\n" filename (l-1) (c-1) c
 
-let rec print_expr e =
+(*let rec print_expr e =
   match e with
   | Eprint s -> print_endline s
   | Eunop (e1, e2) -> if e1 = Uneg then (fprintf stdout "-"; print_expr e2)
@@ -53,7 +55,7 @@ let rec print_ast p =
     match t with
     | Decl_fun f -> let t = f.body_func in print_block t; (*print_endline "check_ast"*)
     | Decl_struct s -> ()
-    in List.iter print_decl p
+    in List.iter print_decl p*)
 
 
 let () =
@@ -62,9 +64,9 @@ let () =
   try
     let p = Parser.prog Lexer.token buf in
     close_in f;
-    print_ast p;
-    check_main p;
-    compile_program p (Filename.chop_suffix filename ".txt" ^ ".s");
+    (*print_ast p;*)
+    let p1 = gen_type_check p in
+    compile_program p1 (Filename.chop_suffix filename ".rs" ^ ".s");
   with
     | Lexer.Lexing_error c -> localisation (Lexing.lexeme_start_p buf);
 	                             eprintf "Erreur lexicale: %s@.\n" c;
