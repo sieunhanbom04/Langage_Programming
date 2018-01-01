@@ -140,6 +140,15 @@ let rec check_noborrow = function
 	|Tstructgeneric (_, t) -> check_noborrow t
 	|Tmut t -> check_noborrow t
 	|Tref _ -> false
+	
+
+let rec check_struct_autoref s = function 
+	|Tnull | Tint | Tbool -> false
+	|Tstruct n -> n = s (* Structure fields are guaranteed not to contain borrows*)
+	|Tstructgeneric _ -> false
+	|Tmut t -> check_struct_autoref s t
+	|Tref t -> check_struct_autoref s t
+
 (*
 let check_ownership env v = match v with 
 	|Evar w -> let _, _, stat = Hashtbl.find env.evar w in if stat = Vide then raise (Type_Error ("Access to void variable : " ^ w)) 
@@ -150,7 +159,8 @@ let rec usable_as t1 t2 = if t1 = t2 then true else match (t1, t2) with (*predic
 	|Tref t , Tref t' -> usable_as t t' 
 	|Tmut t , Tmut t' -> usable_as t t' 
 	|Tmut t , t' -> usable_as t t'
-	|t, Tmut t' when not (is_move t) -> usable_as t t'
+	
+	(*|t, Tmut t' when not (is_move t) -> usable_as t t'*)
 	|Tstructgeneric (_,Tnull) , Tstructgeneric (_,t')  when (is_move t')-> true 
 	|Tstructgeneric (_,t) , Tstructgeneric (_,t')  -> usable_as t t' 
 	| t, t' -> print_endline ((str_type t) ^ " not usable as "^(str_type t'));false
@@ -208,9 +218,10 @@ and type_check_expr env e= match e with
   														TEbinop (b , te1 , te2, loc, t)
   | Eunop (u, e, loc) -> let t, te = type_check_unop env u e loc in
   											 TEunop(u, te, loc, t)
-  | Estruct (e, id, loc) -> let texp = type_check_expr env e in (match below (extract_type_expr texp) with 
-												|Tstruct st -> let stl = Hashtbl.find genv_struct st in
-												try let elem = (List.find (fun xx -> xx.name_struct_arg = id) stl) in TEstruct(texp, id, loc, elem.type_struct_arg) with Not_found -> raise (Type_Error ("Unknown structure field", loc))
+  | Estruct (e, id, loc) -> let texp = type_check_expr env e in 
+  											(match below (extract_type_expr texp) with 
+												|Tstruct st -> begin let stl = Hashtbl.find genv_struct st in
+												try let elem = (List.find (fun xx -> xx.name_struct_arg = id) stl) in TEstruct(texp, id, loc, elem.type_struct_arg) with Not_found -> raise (Type_Error ("Unknown structure field", loc)) end
 												| _ -> raise (Type_Error ("Field indexing is only possible for structures", loc)))  
 
   | Elength (e, l) -> let texp = type_check_expr env e in (match below (extract_type_expr texp) with 
@@ -275,7 +286,7 @@ and type_check_unop env u e loc = let texp = type_check_expr env e in
   | Uneg when te = Tint -> (Tint, texp) (* -e *)
   | Unot when te = Tbool -> (Tbool, texp)(* not e *)
   | Unstar -> let tr = (match te with | Tref ty -> ty | Tmut Tref ty -> ty | _ -> raise (Type_Error ("Dereferencing operator applied to non reference value", loc)) ) in (tr, texp)
-  | Unp -> if not (is_lvalue env e) then raise (Type_Error ("References can only be created for left values", loc)); (Tref te, texp) 
+  | Unp -> if not (is_lvalue env e) && (match e with Evar _ -> false |_ -> true) then raise (Type_Error ("References can only be created for left values", loc)); ((match te with Tmut ty -> Tref ty | ty -> Tref ty), texp) 
   | Unmutp -> if not (is_lvalue env e) then raise (Type_Error ("References can only be created for leftvalues", loc));
 							if not (is_mutable env e) then raise (Type_Error ("Mutable references can only be created for mutable values", loc));
 							(Tref (match te with Tmut _ -> te |_-> Tmut te), texp) (************************************* *)
@@ -308,7 +319,7 @@ and is_mutable env exp = let texp = extract_type_expr (type_check_expr env exp) 
 (***************************************)
 
 and is_lvalue env = function
-	| Evar (id, _) when Hashtbl.mem env.evar id && (let t,m = Hashtbl.find env.evar id in m || (match below t with Tstructgeneric _ -> true |_ -> false)) -> true
+	| Evar (id, _) when Hashtbl.mem env.evar id && (let t,m = Hashtbl.find env.evar id in m || (match below t with Tstruct _ |Tstructgeneric _ -> true |_ -> false)) -> true
 	| Eindex (v, e, _) -> is_mutable env v || (let tv = extract_type_expr (type_check_expr env v) in match tv with 
 											(*|Tref Tstructgeneric _*) |Tref Tmut Tstructgeneric _ |Tstructgeneric _ -> true |_ -> false)
 	| Estruct (e, id, _) -> is_mutable env e || (match extract_type_expr (type_check_expr env e) with |Tmut _(*| Tref Tstruct _*) | Tref Tmut Tstruct _  -> true | _ -> false)
@@ -316,7 +327,7 @@ and is_lvalue env = function
 														(match teref with | Tref _ |Tmut Tref _ -> true | _ -> false )
 	| _ -> false
 
-and check_struct_fields env larg lid loc = if not (List.for_all (fun x -> List.exists (fun y -> x.name_struct_arg = fst y && (usable_as (extract_type_expr (type_check_expr env (snd y))) x.type_struct_arg)) lid) larg) then raise (Type_Error ("Incoherent structure assignment", loc))
+and check_struct_fields env larg lid loc = if not (List.for_all (fun x -> List.exists (fun y -> x.name_struct_arg = fst y && (usable_as (extract_type_expr (type_check_expr env (snd y))) x.type_struct_arg)) lid) larg) || (List.exists (fun x -> List.for_all (fun y -> not (y.name_struct_arg = fst x)) larg) lid)then raise (Type_Error ("Incoherent structure assignment", loc))
 
 
 let rec check_nodouble s = function
@@ -334,7 +345,8 @@ let rec check_welltyped = function
 	| _ -> false
 
 
-let type_check_fndecl df = let lnames = List.map (fun x -> x.name_arg) df.def_func in if not (check_nodouble Sset.empty lnames) then raise 
+let type_check_fndecl df = if Hashtbl.mem genv_func df.name_func then raise (Type_Error ("Redefinition of function "^df.name_func, df.loc_func));
+														let lnames = List.map (fun x -> x.name_arg) df.def_func in if not (check_nodouble Sset.empty lnames) then raise 
 (Type_Error ("Names of function parameters must be distinct", df.loc_func));
 														List.iter (fun x -> if not (check_welltyped x.type_arg) then raise (Type_Error ("Function : "^df.name_func^" , Ill defined type for parameter "^x.name_arg, x.loc_arg))) df.def_func;
 														if not (check_welltyped df.return_func) then raise (Type_Error ("Function : "^df.name_func^" ,Ill defined return type", df.loc_func));
@@ -352,13 +364,19 @@ let type_check_fndecl df = let lnames = List.map (fun x -> x.name_arg) df.def_fu
 
 let type_check_decl = function
 	|Decl_fun df -> type_check_fndecl df
-	|Decl_struct ds -> Hashtbl.add genv_struct ds.name_struct ds.def_struct;
+	|Decl_struct ds -> if Hashtbl.mem genv_struct ds.name_struct then raise (Type_Error ("Redefinition of structure "^ds.name_struct, ds.loc_struct));				Hashtbl.add genv_struct ds.name_struct ds.def_struct;
 											List.iter (fun x -> 
 								if not (check_welltyped x.type_struct_arg) 
 								then raise (Type_Error ("Incorrectly typed field in structure declaration", x.loc_struct_arg)) ; 
 								
+								if (check_struct_autoref ds.name_struct x.type_struct_arg) then raise (Type_Error ("Structure field type can only refer to same structure under Vec type", x.loc_struct_arg)) ; 
+
+								
 								if not (check_noborrow x.type_struct_arg) 
 								then raise (Type_Error ("Borrow types are not allowed in structure fields", x.loc_struct_arg))) ds.def_struct;
+								let lnames = List.map (fun x -> x.name_struct_arg) ds.def_struct in if not (check_nodouble Sset.empty lnames) then raise 
+(Type_Error ("Names of structure fields must be distinct", ds.loc_struct));
+														
 											TDecl_struct ds
 
 
