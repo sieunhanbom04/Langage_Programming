@@ -7,11 +7,8 @@ open Tcresource
 open Location
 open Printf
 
-exception VarUndef of string
-exception FieldUndef of string
-exception GetReference
-exception Stack_overflow of string
-exception Not_Vector
+exception ShouldBeDealtByTC of string
+exception ErrorCompiler of location * string
 
 let ref frame_size = 0
 
@@ -75,7 +72,7 @@ let rec calculate_size typ =
   match typ with
   | Tnull -> 8
   | Tint | Tbool -> 8
-  | Tstruct id -> (try let t = Hashtbl.find representation_env id in t.total with Not_found -> raise (VarUndef(id)))
+  | Tstruct id -> (try let t = Hashtbl.find representation_env id in t.total with Not_found -> raise (ShouldBeDealtByTC("undefined field" ^ id)))
   | Tstructgeneric _ -> 16
   | Tref t -> 8
   | Tmut t -> calculate_size t
@@ -104,7 +101,7 @@ let rec return_type_vector ty =
   | Tmut x -> return_type_vector x
   | Tref x -> return_type_vector x
   | Tstructgeneric (id,t) -> t
-  | _ -> raise Not_Vector
+  | _ -> raise (ShouldBeDealtByTC("It is not a vector"))
 
 (* Calculate the offset from the pointer to the address of fields in each struct *)
 
@@ -140,14 +137,14 @@ let calculate_rep p =
                                   (fun x y -> (y.name_struct_arg, calculate_size y.type_struct_arg)::x) [] field_list in
                       Hashtbl.add representation_env name
                       {total = total; fields = calculate_relative_position (List.rev fields) 0};
-                      print_struct (calculate_relative_position (List.rev fields) 0);
+                      (*print_struct (calculate_relative_position (List.rev fields) 0);*)
                       let size = List.map (fun x -> x.name_struct_arg, calculate_size x.type_struct_arg) field_list in
                       Hashtbl.add struct_env name size
 
   in List.iter calculate_struct p
 
 (*This function is dedicated for the declaration of function*)
-let compute_address env_alloc e =
+(*let compute_address env_alloc e =
   match e with
   | Evar (x,_) ->
   begin
@@ -156,7 +153,7 @@ let compute_address env_alloc e =
   with
     Not_found -> raise (VarUndef x)
   end
-  | _ -> raise GetReference
+  | _ -> raise GetReference*)
 
 (*This function allocates the memory for the whole program*)
 
@@ -168,13 +165,13 @@ let rec alloc_expr env_alloc next e =
 
   | TEbool (i,_,_) when i = false -> PEbool 0, next
 
-  | TEvar (x,_,t) ->
+  | TEvar (x,l,t) ->
     begin
     try
       let ofs_x = Vmap.find x env_alloc in
       PEvar (ofs_x, calculate_size t), next
     with
-      Not_found -> raise (VarUndef x)
+      Not_found -> raise (ErrorCompiler(l, "undefined variable" ^ x))
     end
 
   | TEbinop (o,e1,e2,_,_) ->
@@ -191,12 +188,12 @@ let rec alloc_expr env_alloc next e =
                 let size = (calculate_size true_type) in
                 PEdereference (exp, size), fpmax
 
-    | Unp | Unmutp -> print_string "Found you mother fucker\n";let t = calculate_size (extract_type_expr e) in
+    | Unp | Unmutp -> let t = calculate_size (extract_type_expr e) in
                 PEreference(t,exp), fpmax
 
     | _ -> PEunop (o, exp), fpmax)
 
-  | TEstruct (e,id,_,_) -> let ty,de_re = auto_dereference (extract_type_expr e) in
+  | TEstruct (e,id,l,_) -> let ty,de_re = auto_dereference (extract_type_expr e) in
                       let loc,size2 =
                       (try
                         let t = convert_into_struct_name ty in
@@ -206,7 +203,7 @@ let rec alloc_expr env_alloc next e =
                         let offset2 = List.assoc id temp2 in
                         offset, offset2
                       with
-                        | _ -> raise (FieldUndef(id))
+                        | _ -> raise (ErrorCompiler(l,"undefined field" ^ id))
                       ) in
                       let exp, fpmax = alloc_expr env_alloc next e in
 
@@ -230,10 +227,10 @@ let rec alloc_expr env_alloc next e =
 
   | TEprint (s,_,_) -> let t = find_next_global 0 0 in Hashtbl.add variable_env t s; PEprint(t), next
 
-  | TEcall (id, e,_,_) -> let exp, fpmax = List.fold_right
+  | TEcall (id, e,l,_) -> let exp, fpmax = List.fold_right
                       (fun t (exp, fpmax) -> let e1, fpmax1 = alloc_expr env_alloc next t in
                                               e1::exp ,max fpmax fpmax1) e ([],next) in
-                                              PEcall (id, exp, try Hashtbl.find function_env id with _ -> raise (Stack_overflow "-1")), fpmax
+                                              PEcall (id, exp, try Hashtbl.find function_env id with _ -> raise (ErrorCompiler(l, "undefined function" ^ id))), fpmax
 
   | TEblock (b,_,_) -> let t, fpmax = alloc_block env_alloc next b in
                 PEblock(t), fpmax
@@ -248,7 +245,7 @@ and alloc_instruction env_alloc next ins =
                             PImutExAssign (- next - 8, size, t), (max (next + size) fpmax),
                             Vmap.add id (- next - 8) env_alloc
 
-  | TIstAssign (id1, id2, e1,_,_,_) -> (try (let st = Hashtbl.find representation_env id2 in
+  | TIstAssign (id1, id2, e1,_,l,_) -> (try (let st = Hashtbl.find representation_env id2 in
                                 let st2 = Hashtbl.find struct_env id2 in
                                    let l_exp, fpmax = List.fold_right (fun (x,y) (e,fp) ->
                                       let t1,fp1 = alloc_expr env_alloc next y in
@@ -257,7 +254,7 @@ and alloc_instruction env_alloc next ins =
                                       (loc,size,t1)::e, max fp fp1) e1 ([],next) in
                                       PImutStAssign ( - next - 8, st.total, l_exp), (max fpmax (next + st.total)),
                                       Vmap.add id1 ( - next - 8) env_alloc)
-                                      with _ -> raise (Stack_overflow "0"))
+                                      with _ -> raise (ErrorCompiler (l,"Instruction assign error")))
 
   | TIwhile (e, b,_,_) -> let e1, fpmax1 = (alloc_expr env_alloc next e) in
                        let b1, fpmax2 = (alloc_block env_alloc next b) in
@@ -311,8 +308,8 @@ let alloc_decl d =
                   let ra = df.return_tfunc in
                   let arg = df.def_tfunc in
                   let env_alloc, next = List.fold_right (fun x (e,n) -> Vmap.add x.name_arg (n+calculate_size x.type_arg) e,
-                                          (fprintf stdout "%d\n" (n + calculate_size x.type_arg);
-                                          n + calculate_size x.type_arg)) arg (Vmap.empty, 8) in
+                                          (*(fprintf stdout "%d\n" (n + calculate_size x.type_arg);*)
+                                          (n + calculate_size x.type_arg)) arg (Vmap.empty, 8) in
                   let b, fmax = alloc_block env_alloc 0 bl in
                   PDecl_fun ({ name_pfunc = n;
                     size_pfunc = next - 8;
@@ -371,10 +368,10 @@ let rec compile_expr e =
                       memmove size_f in
       pre_code ++ copy_code
 
-  | PEcall (id, exp, size) -> if(id = "print_int") then (fprintf stdout "size test%d\n" (List.length exp));
+  | PEcall (id, exp, size) -> (*if(id = "print_int") then (fprintf stdout "size test%d\n" (List.length exp));*)
                               (try let fcall = List.fold_left (fun code e -> code ++ compile_expr e) nop exp in
                               pushn size ++ fcall ++ call id ++ popn (Hashtbl.find function_size_env id)
-                              with _ -> raise (Stack_overflow ("2")))
+                              with _ -> raise (ShouldBeDealtByTC("Function Call Error" ^ id)))
 
   | PElength (exp,dr) -> let pre_code = if dr then
                           popq rcx ++ pushn 16 ++ leaq (ind ~ofs:8 rsp) rbx ++
@@ -420,15 +417,15 @@ and compile_ins ins =
                     compile_block b ++ jmp label1 ++ (label label2)
   | PIcond c -> compile_condition c
   | PIreturn (f,e) -> (try let return_label = Hashtbl.find return_label_env f in compile_expr e ++ jmp return_label
-                      with _ -> raise (Stack_overflow "3"))
+                      with _ -> raise (ShouldBeDealtByTC("Function Return Error" ^ f)))
   | PIreturnNull f -> (try let return_label = Hashtbl.find return_label_env f in
                       jmp return_label
-                      with _ -> raise (Stack_overflow "4"))
+                      with _ -> raise (ShouldBeDealtByTC("Function Return Error" ^ f)))
   | _ -> nop
 
 and compile_condition c =
   match c with
-  | PCif (e, block1, None) -> print_string "shit, found you\n";
+  | PCif (e, block1, None) -> (*print_string "shit, found you\n";*)
                               let label1 = find_next_global 0 1 in
                               let t1 = compile_expr e in
                               let b1 = compile_block block1 in
@@ -522,7 +519,7 @@ and copy_vec e size_field index =
 let compile_decl d =
   match d with
   | PDecl_fun (func, fpmax) -> ((*try*)
-    let size_return = try Hashtbl.find function_env func.name_pfunc with _ -> raise (Stack_overflow "9") in
+    let size_return = try Hashtbl.find function_env func.name_pfunc with _ -> raise (ShouldBeDealtByTC("Function Return Size Error")) in
 
     let return_address = 8 + (Hashtbl.find function_size_env func.name_pfunc) + size_return in
 

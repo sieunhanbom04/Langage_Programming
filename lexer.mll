@@ -79,7 +79,7 @@ and comment = parse
   | "*/" {()}
   | "/*" { comment lexbuf; comment lexbuf }
   | _ { comment lexbuf }
-  | eof { failwith "wrong comment" }
+  | eof { raise (Lexing_error ("Wrong comment"))}
 (*
 rule token = parse
   | "//" [^ '\n']* '\n'

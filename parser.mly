@@ -5,15 +5,14 @@
   open Ast
   open Printf
   open Parsing
+  open Location
 
   let table_type = ["i32",Tint;
                     "bool",Tbool;
                     ]
   let find_type t = try List.assoc t table_type with _ -> Tstruct(t)
 
-  exception Empty_block
-  exception Empty_ins
-  exception Syntax_Error of int
+  exception Syntax_Error of location * string
 
   let rec remove_null_instruction p =
     match p with
@@ -48,13 +47,13 @@
   let return_type l loc = let t = remove_null_instruction (List.concat l) in
                       let rev_t = List.rev t in
                       if (List.length t) = 0 then CBlock([],loc)
-                      else (*(check_valid_block (List.rev (List.tl (List.rev l)));*)
-                      (check_last_ins (List.hd (List.rev l));
-                      let x = List.hd (List.rev (List.concat l)) in
+                      else (*check_valid_block (List.rev (List.tl (List.rev l)));*)
+                      (try (check_last_ins (List.hd (List.rev l)));
+                      (let x = List.hd (List.rev (List.concat l)) in
                         match x with
                         | Iexpr (e,l) ->  CFullBlock(remove_null_instruction (List.rev (List.tl rev_t)),e,loc)
                         | _ -> CBlock (t,loc))
-
+                      with _ -> raise (Syntax_Error (loc, "Syntax Error With Block")))
 
   let rec fix_return_block b name =
     match b with
@@ -257,17 +256,20 @@ expr:
 
   | e1 = expr POINT id = IDENT %prec st { Estruct(e1,id, Lct($startpos,$endpos)) }
 
-  | e = expr POINT id = IDENT LEFTPAR RIGHTPAR %prec length { if id = "len" then Elength(e, Lct($startpos,$endpos)) else raise Parsing.Parse_error}
+  | e = expr POINT id = IDENT LEFTPAR RIGHTPAR %prec length { if id = "len" then Elength(e, Lct($startpos,$endpos))
+                                                              else raise (Syntax_Error(Lct($startpos,$endpos), "Expected keywork len"))}
 
   | e1 = expr LEFTSQ e2 = expr RIGHTSQ { Eindex(e1, e2, Lct($startpos,$endpos)) }
 
-  | t = IDENT EXCL LEFTSQ e = separated_list(COMMA,expr) RIGHTSQ { if t = "vec" then Evector(e, Lct($startpos,$endpos)) else raise (Parsing.Parse_error)}
+  | t = IDENT EXCL LEFTSQ e = separated_list(COMMA,expr) RIGHTSQ { if t = "vec" then Evector(e, Lct($startpos,$endpos))
+                                                                    else raise (Syntax_Error(Lct($startpos,$endpos), "Expected keywork vec"))}
 
   | e1 = IDENT LEFTPAR e = separated_list(COMMA,expr) RIGHTPAR {Ecall(e1, e, Lct($startpos,$endpos))}
 
   | LEFTPAR e = expr RIGHTPAR {e}
 
-  | t = IDENT EXCL LEFTPAR s = CHAIN RIGHTPAR { if t = "print" then Eprint(s, Lct($startpos,$endpos)) else raise (Syntax_Error 5)}
+  | t = IDENT EXCL LEFTPAR s = CHAIN RIGHTPAR { if t = "print" then Eprint(s, Lct($startpos,$endpos))
+                                                else raise (Syntax_Error(Lct($startpos,$endpos), "Expected keywork print"))}
 ;
 
 %inline bop:
