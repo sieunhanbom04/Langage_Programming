@@ -73,7 +73,7 @@ let rec find_return_label n name =
 
 let rec calculate_size typ =
   match typ with
-  | Tnull -> 0
+  | Tnull -> 8
   | Tint | Tbool -> 8
   | Tstruct id -> (try let t = Hashtbl.find representation_env id in t.total with Not_found -> raise (VarUndef(id)))
   | Tstructgeneric _ -> 16
@@ -84,9 +84,11 @@ let rec calculate_size typ =
 (*reminder:: this function is modified before test vector*)
 let rec auto_dereference t =
   match t with
-  | Tmut x -> auto_dereference x
-  | Tstruct _ | Tstructgeneric _ -> t, false
   | Tref i -> let t1, dr = auto_dereference i in t1, true
+  | Tmut x -> auto_dereference x
+  | Tstruct _
+  | Tstructgeneric _ -> t, false
+  | _ as ty -> ty, false
 
 (*Convert from type struct into name of struct*)
 
@@ -341,8 +343,10 @@ let rec compile_expr e =
   | PEconst i -> movq (imm i) (reg rax) ++ pushq (reg rax)
   | PEbool b -> pushq (imm b)
   | PEvar (v,size) -> pushn size ++ leaq (ind ~ofs:(size-8) rsp) (rbx) ++ leaq (ind ~ofs:v rbp) (rcx) ++ memmove size
-  | PEprint (s) ->  movq (ilab s) (reg rdi) ++ pushq (reg rax)
-                  ++ movq (imm 0) (reg rax) ++ call "printf" ++ popq rax
+  | PEprint (s) ->  movq (ilab s) (reg rdi) ++ pushq (reg rax) ++ pushq (reg rbx)
+                  ++ pushq (reg rcx) ++ pushq (reg rdx)
+                  ++ movq (imm 0) (reg rax) ++ call "printf" ++
+                  popq rdx ++ popq rcx++ popq rbx ++ popq rax
                   (*TODO:: save other register as well*)
 
   | PEbinop (o,exp1,exp2) -> compile_binop_expr o exp1 exp2
