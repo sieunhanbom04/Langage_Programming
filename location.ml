@@ -3,7 +3,7 @@
 
 open Lexing
 open Parsing
-open Format
+open Printf
 
 type location = Lct of position * position
   (*position is in-built in Lexing, including 4 tuples:

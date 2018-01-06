@@ -8,7 +8,28 @@ open Compile
 open Tcstatic
 open Tcresource
 
-let filename = "tung.rs"
+let length = Array.length Sys.argv
+let () = (if length > 3 then (print_endline  "Prustc Error : too many arguments in call"; exit 2))
+
+
+type parameter = Nothing | Parse_only | Type_only | No_asm
+
+(*let filename = "tests/exec/vec.rs"*)
+
+let () = if length < 2 then ((print_endline "Prustc Error : No file given to compile"); exit 2)
+
+let filename = Sys.argv.(1)
+
+let param = if length >= 3 then (match Sys.argv.(2) with 
+	|"--parse-only" -> Parse_only
+
+	|"--type-only" -> Type_only
+
+	|"--no-asm" -> No_asm
+
+	| _ -> (print_endline ("Prustc Error : unrecognized argument : "^Sys.argv.(2)); print_endline "Possible arguments are : --parse-only	--type-only	--no-asm"; exit 2))
+
+						else Nothing
 
 let localisation pos =
   let l = pos.pos_lnum in
@@ -20,42 +41,6 @@ let localisation_modify pos =
   let c = pos.pos_cnum - pos.pos_bol + 1 in
   eprintf "File \"%s\", line %d, characters %d-%d:\n" filename (l-1) (c-1) c
 
-(*let rec print_expr e =
-  match e with
-  | Eprint s -> print_endline s
-  | Eunop (e1, e2) -> if e1 = Uneg then (fprintf stdout "-"; print_expr e2)
-  | Econst e1 -> (fprintf stdout "%d\n" e1)
-  | Evar id -> (fprintf stdout "%s\n" id)
-  | Estruct (e1,id) -> print_expr e1; (fprintf stdout "%s\n" id)
-  | Ebool b -> (fprintf stdout "%s\n" (string_of_bool b))
-  | Ebinop (b,e1,e2) -> print_expr e1; print_expr e2
-  | Ecall(id,e1) -> print_endline id; List.iter print_expr e1
-  | _ -> ()
-
-let print_ins ins =
-  let print_output inst =
-    match inst with
-    | Inothing -> fprintf stdout "nothing"
-    | Iexpr e -> print_expr e
-    | IexAssign (id,e) -> print_expr e
-    | ICreturn (f,e1) -> fprintf stdout "%s\n" f; print_expr e1
-    | ICreturnNull f -> fprintf stdout "%s\n" f
-    | IstAssign (id1, id2, t) -> (fprintf stdout "%s\n" id1); (fprintf stdout "%s\n" id2);
-    | _ -> ()
-  in
-  List.iter print_output ins
-
-let print_block b =
-  match b with
-  | CBlock bgod -> print_ins (bgod); print_endline "check_block"
-  | CFullBlock (bgod,exp) -> print_ins bgod; print_expr exp; print_endline "check_fullblock"
-
-let rec print_ast p =
-  let print_decl t =
-    match t with
-    | Decl_fun f -> let t = f.body_func in print_block t; (*print_endline "check_ast"*)
-    | Decl_struct s -> ()
-    in List.iter print_decl p*)
 
 
 let () =
@@ -64,9 +49,17 @@ let () =
   try
     let p = Parser.prog Lexer.token buf in
     close_in f;
-    (*print_ast p;*)
+
+    if param = Parse_only then exit 0;
+
     let p1 = gen_type_check p in
+
+    if param = Type_only then exit 0;
+
     resource_type_check p1 ;
+
+    if param = No_asm then exit 0;
+
     compile_program p1 (Filename.chop_suffix filename ".rs" ^ ".s");
   with
     | Lexer.Lexing_error c -> localisation (Lexing.lexeme_start_p buf);
@@ -75,6 +68,10 @@ let () =
     | Parser.Error -> localisation (Lexing.lexeme_start_p buf);
 	                       eprintf "Erreur syntaxique@.\n";
 	                       exit 1
-    (*| _ -> localisation_modify (Lexing.lexeme_start_p buf);
-	                       eprintf "Erreur syntaxique 1@.\n";
-	                       exit 1*)
+		| Type_Error (s,l) -> print_endline ("Type Error : "^s); print_location stdout l;
+													exit 1
+		| RType_Error (s,l) -> print_endline ("Resource Type Error : "^s); print_location stdout l;
+													exit 1             
+	  | _ -> print_endline "Unknown error";
+	         exit 2
+	         
